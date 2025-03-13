@@ -44,7 +44,7 @@ export const getPendingHealthCare = async (req, res) => {
             createdAt: user.createdAt,
           },
           healthcare: {
-            ...healthcare._doc, // Includes certificate path
+            ...healthcare._doc,
             ...typeSpecificData?._doc,
           },
         };
