@@ -2,23 +2,13 @@ import userModel from "../Models/userModel.js";
 import HealthCare from "../Models/healthCareModel.js";
 import Doctor from "../Models/doctorModel.js";
 import Nurse from "../Models/nurseModel.js";
-import Pharmacy from "../Models/pharmacyModel.js"; 
-import Laboratory from "../Models/laboratoryModel.js"; 
+import Pharmacy from "../Models/pharmacyModel.js";
+import Laboratory from "../Models/laboratoryModel.js";
+import Patient from "../Models/patientModel.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import validator from "validator";
 import nodemailer from "nodemailer";
-import multer from "multer";
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/"); 
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const upload = multer({ storage });
 
 const createToken = (_id) => {
   return jwt.sign({ _id }, process.env.JWT_SECRET, { expiresIn: "3d" });
@@ -68,7 +58,8 @@ export const registerUser = async (req, res) => {
     clinic_name,
   } = req.body;
 
-  const certificate = req.file; // Certificate file from multer
+  const profileImage = req.files?.profile_image?.[0];
+  const certificate = req.files?.certificate?.[0];
 
   try {
     if (!name || !email || !password || !phone_number || !user_type) {
@@ -80,7 +71,15 @@ export const registerUser = async (req, res) => {
     if (!validator.isStrongPassword(password, { minSymbols: 0 })) {
       return res.status(400).json({ message: "Password must be strong" });
     }
-    if (user_type === "healthcare" && (!location_link || !healthcare_type || !working_hours || !certificate)) {
+
+    const userTypeString = String(user_type).trim().toLowerCase();
+
+    const validUserTypes = ["patient", "healthcare"];
+    if (!validUserTypes.includes(userTypeString)) {
+      return res.status(400).json({ message: "Invalid user type" });
+    }
+
+    if (userTypeString === "healthcare" && (!location_link || !healthcare_type || !working_hours || !certificate)) {
       return res.status(400).json({ message: "All healthcare fields are required" });
     }
 
@@ -97,19 +96,23 @@ export const registerUser = async (req, res) => {
       email,
       hashed_password,
       phone_number,
-      user_type,
-      isApproved: user_type === "patient",
+      user_type: userTypeString,
+      isApproved: userTypeString === "patient",
+      profile_image: profileImage ? profileImage.path : null,
     });
     await user.save();
 
-    if (user_type === "healthcare") {
+    if (userTypeString === "patient") {
+      const patient = new Patient({ user_id: user._id });
+      await patient.save();
+    } else if (userTypeString === "healthcare") {
       const healthCare = new HealthCare({
         user_id: user._id,
         location_link,
         healthcare_type,
         working_hours,
-        can_deliver: can_deliver === "true" || can_deliver === true, 
-        certificate: certificate.path, 
+        can_deliver: can_deliver === "true" || can_deliver === true,
+        certificate: certificate ? certificate.path : null,
       });
       await healthCare.save();
 
@@ -136,28 +139,20 @@ export const registerUser = async (req, res) => {
       await sendEmail(
         process.env.ADMIN_EMAIL,
         "New Healthcare Provider Registration",
-        `<p>Please approve ${name} (${email}) as a healthcare provider.</p>`
+        `<p>Please approve ${name} (${email}) as a healthcare provider. Visit the admin dashboard to review.</p>`
       );
-      if (user_type === "healthcare") {
-        await sendEmail(
-          process.env.ADMIN_EMAIL,
-          "New Healthcare Provider Registration",
-          `<p>Please approve ${name} (${email}) as a healthcare provider. Visit the admin dashboard to review.</p>`
-        );
-      }
     }
 
     const token = createToken(user._id);
     res.status(201).json({
       token,
-      user: { _id: user._id, name, email, user_type, isApproved: user.isApproved },
+      user: { _id: user._id, name, email, user_type: user.user_type, isApproved: user.isApproved, profile_image: user.profile_image },
     });
   } catch (error) {
+    console.error("Registration error:", error);
     res.status(500).json({ message: error.message });
   }
 };
-
-
 
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
@@ -187,6 +182,7 @@ export const loginUser = async (req, res) => {
         email: user.email,
         user_type: user.user_type,
         isApproved: user.isApproved,
+        profile_image: user.profile_image,
       },
     });
   } catch (error) {
@@ -197,7 +193,7 @@ export const loginUser = async (req, res) => {
 
 export const getCurrentUser = async (req, res) => {
   try {
-    const user = req.user; // Set by authMiddleware
+    const user = req.user;
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -208,7 +204,8 @@ export const getCurrentUser = async (req, res) => {
         email: user.email,
         user_type: user.user_type,
         isApproved: user.isApproved,
-        phone_number: user.phone_number, 
+        phone_number: user.phone_number,
+        profile_image: user.profile_image,
       },
     });
   } catch (error) {
@@ -216,5 +213,3 @@ export const getCurrentUser = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
-  export { upload };

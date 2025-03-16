@@ -8,6 +8,7 @@ const UserSchema = new mongoose.Schema(
     phone_number: { type: String, required: true },
     user_type: { type: String, enum: ["patient", "healthcare", "admin", null], default: null },
     isApproved: { type: Boolean, default: false },
+    profile_image: { type: String, default: null },
   },
   { timestamps: true }
 );

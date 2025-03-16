@@ -1,4 +1,3 @@
-// Routes/adminRoute.js
 import express from "express";
 import { getPendingHealthCare, approveHealthCare } from "../Controllers/healthCareController.js";
 import adminMiddleware from "../Middleware/adminMiddleware.js";
