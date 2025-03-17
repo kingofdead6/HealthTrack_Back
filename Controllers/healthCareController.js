@@ -5,6 +5,34 @@ import Pharmacy from "../Models/pharmacyModel.js";
 import Laboratory from "../Models/laboratoryModel.js";
 import userModel from "../Models/userModel.js";
 import Appointment from "../Models/appointmentModel.js";
+import Announcement from "../Models/announcementModel.js";
+import jwt from "jsonwebtoken";
+import nodemailer from "nodemailer";
+
+const sendEmail = async (toEmail, subject, html) => {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: toEmail,
+    subject,
+    html,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Email sent successfully to ${toEmail}`);
+  } catch (error) {
+    console.error("Error sending email:", error);
+    throw error;
+  }
+};
 
 export const getPendingHealthCare = async (req, res) => {
   try {
@@ -143,20 +171,16 @@ export const getAllApprovedHealthCare = async (req, res) => {
         let typeSpecificData = {};
         switch (healthcare.healthcare_type) {
           case "doctor":
-            typeSpecificData = await Doctor.findOne({ healthcare_id: healthcare._id })
-              .select("speciality clinic_name");
+            typeSpecificData = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name");
             break;
           case "nurse":
-            typeSpecificData = await Nurse.findOne({ healthcare_id: healthcare._id })
-              .select("ward clinic_name");
+            typeSpecificData = await Nurse.findOne({ healthcare_id: healthcare._id }).select("ward clinic_name");
             break;
           case "pharmacy":
-            typeSpecificData = await Pharmacy.findOne({ healthcare_id: healthcare._id })
-              .select("pharmacy_name");
+            typeSpecificData = await Pharmacy.findOne({ healthcare_id: healthcare._id }).select("pharmacy_name");
             break;
           case "laboratory":
-            typeSpecificData = await Laboratory.findOne({ healthcare_id: healthcare._id })
-              .select("lab_name equipment clinic_name");
+            typeSpecificData = await Laboratory.findOne({ healthcare_id: healthcare._id }).select("lab_name equipment clinic_name");
             break;
         }
 
@@ -165,7 +189,7 @@ export const getAllApprovedHealthCare = async (req, res) => {
           name: user.name,
           email: user.email,
           phone_number: user.phone_number,
-          profile_image: user.profile_image || "", 
+          profile_image: user.profile_image || "",
           healthcare_type: healthcare.healthcare_type,
           location_link: healthcare.location_link,
           working_hours: healthcare.working_hours,
@@ -189,7 +213,7 @@ export const getHealthcareAppointments = async (req, res) => {
     const appointments = await Appointment.find({ user_id: req.user._id })
       .populate({
         path: "patient_id",
-        select: "name",
+        select: "name profile_image", 
         model: userModel,
       })
       .sort({ date: -1 });
@@ -229,7 +253,6 @@ export const updateAppointmentStatus = async (req, res) => {
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
-
 
 export const getHealthcareProfile = async (req, res) => {
   const { healthcareId } = req.params;
@@ -293,7 +316,7 @@ export const getHealthcareProfile = async (req, res) => {
       name: healthcareUser.name || "Unknown Provider",
       email: healthcareUser.email || "Not provided",
       phone_number: healthcareUser.phone_number || "Not provided",
-      profile_image: healthcareUser.profile_image || "", 
+      profile_image: healthcareUser.profile_image || "",
       healthcare_type: healthcare.healthcare_type,
       location_link: healthcare.location_link || "Not provided",
       working_hours: healthcare.working_hours || "Not specified",
@@ -308,5 +331,172 @@ export const getHealthcareProfile = async (req, res) => {
   } catch (error) {
     console.error("Error fetching healthcare profile:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
+  }
+};
+
+export const updateHealthcareProfile = async (req, res) => {
+  const userId = req.user._id;
+  const {
+    phone_number,
+    location_link,
+    working_hours,
+    can_deliver,
+    speciality,
+    ward,
+    pharmacy_name,
+    lab_name,
+    equipment,
+    clinic_name,
+  } = req.body;
+  const profile_image = req.files?.profile_image?.[0]?.path;
+
+  try {
+    const user = await userModel.findById(userId);
+    if (!user || user.user_type !== "healthcare") {
+      return res.status(404).json({ message: "User not found or not healthcare" });
+    }
+
+    user.phone_number = phone_number || user.phone_number;
+    if (profile_image) user.profile_image = profile_image;
+    await user.save();
+
+    const healthcare = await HealthCare.findOne({ user_id: userId });
+    if (!healthcare) {
+      return res.status(404).json({ message: "Healthcare record not found" });
+    }
+
+    healthcare.location_link = location_link || healthcare.location_link;
+    healthcare.working_hours = working_hours || healthcare.working_hours;
+    healthcare.can_deliver = can_deliver === "true" || can_deliver === true;
+    await healthcare.save();
+
+    let typeSpecificModel;
+    switch (healthcare.healthcare_type) {
+      case "doctor":
+        typeSpecificModel = await Doctor.findOne({ healthcare_id: healthcare._id });
+        if (typeSpecificModel) {
+          typeSpecificModel.speciality = speciality || typeSpecificModel.speciality;
+          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
+          await typeSpecificModel.save();
+        }
+        break;
+      case "nurse":
+        typeSpecificModel = await Nurse.findOne({ healthcare_id: healthcare._id });
+        if (typeSpecificModel) {
+          typeSpecificModel.ward = ward || typeSpecificModel.ward;
+          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
+          await typeSpecificModel.save();
+        }
+        break;
+      case "pharmacy":
+        typeSpecificModel = await Pharmacy.findOne({ healthcare_id: healthcare._id });
+        if (typeSpecificModel) {
+          typeSpecificModel.pharmacy_name = pharmacy_name || typeSpecificModel.pharmacy_name;
+          await typeSpecificModel.save();
+        }
+        break;
+      case "laboratory":
+        typeSpecificModel = await Laboratory.findOne({ healthcare_id: healthcare._id });
+        if (typeSpecificModel) {
+          typeSpecificModel.lab_name = lab_name || typeSpecificModel.lab_name;
+          typeSpecificModel.equipment = equipment || typeSpecificModel.equipment;
+          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
+          await typeSpecificModel.save();
+        }
+        break;
+    }
+
+    const updatedProfile = await getHealthCareDetails(req, { ...res, status: () => ({ json: (data) => data }) }); // Mock res for reuse
+    res.status(200).json({ ...updatedProfile, user: { phone_number: user.phone_number, profile_image: user.profile_image } });
+  } catch (error) {
+    console.error("Update error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const deleteHealthcareRequest = async (req, res) => {
+  const token = req.headers.authorization.split(" ")[1];
+  const { frontendUrl } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await userModel.findById(decoded._id);
+    if (!user || user.user_type !== "healthcare") {
+      return res.status(404).json({ message: "User not found or not healthcare" });
+    }
+
+    const deletionToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+    const deletionLink = `${frontendUrl}/delete-account?token=${deletionToken}`;
+
+    await sendEmail(
+      user.email,
+      "Account Deletion Request",
+      `<p>Click <a href="${deletionLink}">here</a> to confirm account deletion. This link expires in 1 hour.</p>`
+    );
+
+    res.status(200).json({ message: "Deletion request sent" });
+  } catch (error) {
+    console.error("Delete request error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const createAnnouncement = async (req, res) => {
+  const { title, content } = req.body;
+
+  try {
+    const user = await userModel.findById(req.user._id);
+    if (!user || user.user_type !== "healthcare") {
+      return res.status(403).json({ message: "Unauthorized: Only healthcare providers can create announcements" });
+    }
+
+    const announcement = new Announcement({
+      title,
+      content,
+      healthcare_id: req.user._id,
+    });
+
+    await announcement.save();
+    console.log("Announcement created:", announcement);
+    res.status(201).json({ message: "Announcement created successfully", announcement });
+  } catch (error) {
+    console.error("Error creating announcement:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAllAnnouncements = async (req, res) => {
+  try {
+    const announcements = await Announcement.find()
+      .populate("healthcare_id", "name profile_image") 
+      .sort({ createdAt: -1 }); 
+
+    console.log("Fetched all announcements:", announcements);
+    res.status(200).json(announcements);
+  } catch (error) {
+    console.error("Error fetching announcements:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const deleteAnnouncement = async (req, res) => {
+  const { announcementId } = req.params;
+
+  try {
+    const announcement = await Announcement.findById(announcementId);
+    if (!announcement) {
+      return res.status(404).json({ message: "Announcement not found" });
+    }
+
+    if (announcement.healthcare_id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized: Only the creator can delete this announcement" });
+    }
+
+    await Announcement.deleteOne({ _id: announcementId });
+    console.log("Announcement deleted:", announcementId);
+    res.status(200).json({ message: "Announcement deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting announcement:", error.message);
+    res.status(500).json({ message: "Server error" });
   }
 };

@@ -70,6 +70,7 @@ export const confirmAccountDeletion = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 export const updatePatientProfile = async (req, res) => {
   const { gender, height, weight, blood_type, medical_state, phone_number } = req.body;
   try {
@@ -376,6 +377,30 @@ export const rateAppointment = async (req, res) => {
     res.status(200).json({ message: "Rating submitted successfully", appointment });
   } catch (error) {
     console.error("Error submitting rating:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+export const getPatientProfileById = async (req, res) => {
+  const { patientId } = req.params;
+
+  try {
+    const requester = await userModel.findById(req.user._id);
+    if (!requester || requester.user_type !== "healthcare") {
+      return res.status(403).json({ message: "Unauthorized: Only healthcare providers can access patient profiles" });
+    }
+
+    const patient = await Patient.findOne({ user_id: patientId }).populate(
+      "user_id",
+      "name email phone_number profile_image"
+    );
+    if (!patient) {
+      return res.status(404).json({ message: "Patient profile not found" });
+    }
+
+    res.status(200).json({ patient });
+  } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
