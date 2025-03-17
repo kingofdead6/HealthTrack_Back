@@ -213,7 +213,7 @@ export const getHealthcareAppointments = async (req, res) => {
     const appointments = await Appointment.find({ user_id: req.user._id })
       .populate({
         path: "patient_id",
-        select: "name profile_image", 
+        select: "name profile_image",
         model: userModel,
       })
       .sort({ date: -1 });
@@ -231,21 +231,43 @@ export const updateAppointmentStatus = async (req, res) => {
   const { status } = req.body;
 
   try {
-    const appointment = await Appointment.findById(appointmentId);
-    if (!appointment) {
+    const appointment = await Appointment.findById(appointmentId)
+      .populate("patient_id", "name email") 
+      .populate("user_id", "name"); 
+          if (!appointment) {
       return res.status(404).json({ message: "Appointment not found" });
     }
-    if (appointment.user_id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: "Unauthorized to update this appointment" });
-    }
+    
 
-    const validStatuses = ["pending", "active", "completed"];
+    const validStatuses = ["pending", "active", "completed", "rejected"];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: "Invalid status value" });
+    }
+    if (status === "active" && appointment.status !== "pending") {
+      return res.status(400).json({ message: "Only pending appointments can be validated to active" });
+    }
+    if (status === "rejected" && appointment.status !== "pending") {
+      return res.status(400).json({ message: "Only pending appointments can be rejected" });
     }
 
     appointment.status = status;
     await appointment.save();
+
+    if (status === "rejected") {
+      const patientEmail = appointment.patient_id.email;
+      const healthcareName = appointment.user_id.name;
+      const subject = "Appointment Rejected";
+      const html = `
+        <p>Dear ${appointment.patient_id.name},</p>
+        <p>Your appointment scheduled for <strong>${new Date(appointment.date).toLocaleDateString()} at ${appointment.time}</strong> with <strong>${healthcareName}</strong> has been rejected.</p>
+        <p>Reason: Unspecified (contact the provider for details).</p>
+        <p>Please schedule a new appointment if needed.</p>
+        <p>Best regards,<br>Your Healthcare Team</p>
+      `;
+      await sendEmail(patientEmail, subject, html);
+      console.log(`Rejection email sent to ${patientEmail}`);
+    }
+
     console.log("Updated appointment status:", appointment);
     res.status(200).json({ message: "Appointment status updated", appointment });
   } catch (error) {

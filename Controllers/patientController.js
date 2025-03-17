@@ -1,8 +1,3 @@
-import Patient from "../Models/patientModel.js";
-import userModel from "../Models/userModel.js";
-import Announcement from "../Models/announcementModel.js";
-import Appointment from "../Models/appointmentModel.js";
-
 import jwt from "jsonwebtoken";
 import { sendDeletionEmail } from "../utils/email.js";
 import bcrypt from "bcryptjs";
@@ -11,7 +6,10 @@ import Doctor from "../Models/doctorModel.js";
 import Nurse from "../Models/nurseModel.js";
 import Pharmacy from "../Models/pharmacyModel.js"; 
 import Laboratory from "../Models/laboratoryModel.js";
-
+import Patient from "../Models/patientModel.js";
+import userModel from "../Models/userModel.js";
+import Announcement from "../Models/announcementModel.js";
+import Appointment from "../Models/appointmentModel.js";
 import fs from "fs/promises"; 
 import path from "path";
 
@@ -132,7 +130,7 @@ export const getPatientProfile = async (req, res) => {
     } catch (error) {
       res.status(500).json({ message: "Server error" });
     }
-  };
+};
 
 export const getAnnouncements = async (req, res) => {
   try {
@@ -197,44 +195,6 @@ export const getPatientAppointments = async (req, res) => {
   }
 };
 
-export const createAppointment = async (req, res) => {
-  const { user_id, date, message } = req.body;
-
-  try {
-    console.log("Received appointment request:", { user_id, date, message, patient_id: req.user._id });
-    const healthcare = await userModel.findById(user_id);
-    console.log("Queried healthcare provider:", healthcare || "Not found");
-
-    if (!healthcare) {
-      console.log("No provider found with ID:", healthcare_id);
-      return res.status(404).json({ message: "Healthcare provider not found" });
-    }
-    if (healthcare.user_type !== "healthcare") {
-      console.log("Provider exists but wrong type:", healthcare.user_type);
-      return res.status(400).json({ message: "User is not a healthcare provider" });
-    }
-    if (!healthcare.isApproved) {
-      console.log("Provider exists but not approved:", healthcare.isApproved);
-      return res.status(403).json({ message: "Healthcare provider is not approved" });
-    }
-
-    const appointment = new Appointment({
-      patient_id: req.user._id,
-      user_id, 
-      date,
-      message,
-      status: "pending",
-    });
-
-    await appointment.save();
-    console.log("Appointment created:", appointment);
-    res.status(201).json({ message: "Appointment request sent successfully", appointment });
-  } catch (error) {
-    console.error("Error creating appointment:", error.message, error.stack);
-    res.status(500).json({ message: `Server error: ${error.message}` });
-  }
-};
-
 export const addFavoriteHealthcare = async (req, res) => {
   const { healthcare_id } = req.body;
 
@@ -283,7 +243,6 @@ export const removeFavoriteHealthcare = async (req, res) => {
   }
 };
 
-
 export const getFavoriteHealthcare = async (req, res) => {
   try {
     const patient = await Patient.findOne({ user_id: req.user._id });
@@ -327,7 +286,7 @@ export const getFavoriteHealthcare = async (req, res) => {
           profile_image: user.profile_image || "",
           healthcare_type: healthcare.healthcare_type,
           location_link: healthcare.location_link,
-          working_hours: healthcare.working_hours,
+          working_hours: healthcare.working_hours || "Mon-Fri 9 AM - 5 PM" ,
           can_deliver: healthcare.can_deliver,
           ...typeSpecificData?._doc,
         };
@@ -381,7 +340,6 @@ export const rateAppointment = async (req, res) => {
   }
 };
 
-
 export const getPatientProfileById = async (req, res) => {
   const { patientId } = req.params;
 
@@ -402,5 +360,123 @@ export const getPatientProfileById = async (req, res) => {
     res.status(200).json({ patient });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+const parseWorkingHours = (workingHours) => {
+  const hoursString = workingHours && typeof workingHours === "string" && workingHours.includes(" - ")
+    ? workingHours
+    : "9 AM - 5 PM";
+  try {
+    if (hoursString === "24/7") return { startHour: 0, endHour: 24 };
+    const [start, end] = hoursString.split(" - ");
+    const startHour = parseInt(start.split(" ")[0]) + (start.includes("PM") && start !== "12 PM" ? 12 : 0);
+    const endHour = parseInt(end.split(" ")[0]) + (end.includes("PM") && end !== "12 PM" ? 12 : 0);
+    return { startHour, endHour };
+  } catch (error) {
+    console.error("Error parsing working hours:", error.message);
+    return { startHour: 9, endHour: 17 };
+  }
+};
+
+export const createAppointment = async (req, res) => {
+  const { user_id, date, time, message, duration } = req.body;
+
+  try {
+    const healthcare = await userModel.findById(user_id);
+    if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved) {
+      return res.status(404).json({ message: "Healthcare provider not found or not approved" });
+    }
+
+    const healthcareDetails = await HealthCare.findOne({ user_id });
+    const { startHour, endHour } = parseWorkingHours(healthcareDetails?.working_hours);
+
+    const apptDate = new Date(date);
+    const [hours, minutes] = time.split(":");
+    apptDate.setUTCHours(parseInt(hours), parseInt(minutes), 0, 0);
+    const apptDuration = parseInt(duration) || 30;
+    const apptEnd = new Date(apptDate);
+    apptEnd.setMinutes(apptEnd.getMinutes() + apptDuration);
+
+    const apptHour = apptDate.getUTCHours() + apptDate.getUTCMinutes() / 60;
+    const apptEndHour = apptHour + apptDuration / 60;
+
+    if (apptHour < startHour || apptEndHour > endHour) {
+      return res.status(400).json({ message: `Appointment outside working hours (${startHour}:00 - ${endHour}:00)` });
+    }
+
+    const now = new Date();
+    const maxDate = new Date(now);
+    maxDate.setDate(now.getDate() + 7);
+    if (apptDate < now || apptDate > maxDate) {
+      return res.status(400).json({ message: "Appointments must be within today and 7 days ahead" });
+    }
+
+    const existingAppointments = await Appointment.find({
+      user_id,
+      status: { $in: ["pending", "active"] }, 
+      date: { $lt: apptEnd },
+      $or: [
+        { date: { $gte: apptDate } },
+        {
+          $expr: {
+            $gt: [
+              { $add: ["$date", { $multiply: [{ $ifNull: ["$duration", 30] }, 60000] }] },
+              apptDate,
+            ],
+          },
+        },
+      ],
+    });
+
+    if (existingAppointments.length > 0) {
+      return res.status(400).json({ message: "Time slot is already booked" });
+    }
+
+    const appointment = new Appointment({
+      patient_id: req.user._id,
+      user_id,
+      date: apptDate,
+      time,
+      message,
+      duration: apptDuration,
+      status: "pending",
+    });
+
+    await appointment.save();
+    res.status(201).json({ message: "Appointment request sent successfully", appointment });
+  } catch (error) {
+    console.error("Error creating appointment:", error.message, error.stack);
+    res.status(500).json({ message: `Server error: ${error.message}` });
+  }
+};
+
+export const getHealthcareAvailability = async (req, res) => {
+  const { healthcareId } = req.params;
+  try {
+    const now = new Date();
+    const maxDate = new Date(now);
+    maxDate.setDate(now.getDate() + 7);
+
+    const appointments = await Appointment.find({
+      user_id: healthcareId,
+      date: { $gte: now, $lte: maxDate },
+      status: { $in: ["pending", "active"] }, 
+    });
+
+    const bookedSlots = appointments.map((appt) => ({
+      start: new Date(appt.date).toISOString(),
+      time: appt.time,
+      duration: appt.duration || 30,
+      end: new Date(new Date(appt.date).getTime() + (appt.duration || 30) * 60000).toISOString(),
+    }));
+
+    const healthcare = await HealthCare.findOne({ user_id: healthcareId });
+    const { startHour, endHour } = parseWorkingHours(healthcare?.working_hours);
+
+    res.status(200).json({ slots: bookedSlots, workingHours: { startHour, endHour } });
+  } catch (error) {
+    console.error("Error in getHealthcareAvailability:", error.message, error.stack);
+    res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };

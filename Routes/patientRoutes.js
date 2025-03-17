@@ -12,7 +12,8 @@ import {
   removeFavoriteHealthcare,
   getFavoriteHealthcare, 
   rateAppointment,
-  getPatientProfileById
+  getPatientProfileById,
+  getHealthcareAvailability
 } from "../Controllers/patientController.js";
 import multer from "multer"; 
 
@@ -41,5 +42,7 @@ router.delete("/favorites", authMiddleware, removeFavoriteHealthcare);
 router.get("/favorites", authMiddleware, getFavoriteHealthcare);
 router.post("/appointments/rate", authMiddleware, rateAppointment);
 router.get("/profile/:patientId", authMiddleware, getPatientProfileById);
+router.get("/appointments/availability/:healthcareId", authMiddleware, getHealthcareAvailability);
+
 
 export default router;
