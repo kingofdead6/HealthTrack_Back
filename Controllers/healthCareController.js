@@ -33,7 +33,21 @@ const sendEmail = async (toEmail, subject, html) => {
     throw error;
   }
 };
-
+const checkApproval = async (req, res, next) => {
+  try {
+    const user = await userModel.findById(req.user._id);
+    if (!user || user.user_type !== "healthcare") {
+      return res.status(403).json({ message: "Unauthorized: Not a healthcare provider" });
+    }
+    if (!user.isApproved) {
+      return res.status(403).json({ message: "Account not approved yet. Please wait for admin approval." });
+    }
+    next();
+  } catch (error) {
+    console.error("Approval check error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 export const getPendingHealthCare = async (req, res) => {
   try {
     const pendingUsers = await userModel
@@ -274,7 +288,7 @@ export const getHealthcareAppointments = async (req, res) => {
   }
 };
 
-export const updateAppointmentStatus = async (req, res) => {
+export const updateAppointmentStatus = [checkApproval, async (req, res) => {
   const { appointmentId } = req.params;
   const { status } = req.body;
 
@@ -322,7 +336,7 @@ export const updateAppointmentStatus = async (req, res) => {
     console.error("Error updating appointment:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
-};
+}];
 
 export const getHealthcareProfile = async (req, res) => {
   const { healthcareId } = req.params;
@@ -333,7 +347,7 @@ export const getHealthcareProfile = async (req, res) => {
       return res.status(404).json({ message: "Healthcare profile not found" });
     }
 
-    const healthcareUser = await userModel.findById(healthcareId).select("name email phone_number user_type profile_image isBanned");
+    const healthcareUser = await userModel.findById(healthcareId).select("name email phone_number user_type profile_image isBanned isApproved");
     if (!healthcareUser || healthcareUser.user_type !== "healthcare") {
       return res.status(404).json({ message: "Healthcare provider not found" });
     }
@@ -382,6 +396,7 @@ export const getHealthcareProfile = async (req, res) => {
       working_hours: healthcare.working_hours || "Not specified",
       can_deliver: healthcare.can_deliver || false,
       isBanned: healthcareUser.isBanned || false,
+      isApproved: healthcareUser.isApproved || false,
       ...typeSpecificData?._doc,
       averageRating,
       comments,
@@ -393,7 +408,7 @@ export const getHealthcareProfile = async (req, res) => {
   }
 };
 
-export const updateHealthcareProfile = async (req, res) => {
+export const updateHealthcareProfile = [checkApproval, async (req, res) => {
   const userId = req.user._id;
   const {
     phone_number,
@@ -471,7 +486,7 @@ export const updateHealthcareProfile = async (req, res) => {
     console.error("Update error:", error);
     res.status(500).json({ message: "Server error" });
   }
-};
+}];
 
 export const deleteHealthcareRequest = async (req, res) => {
   const token = req.headers.authorization.split(" ")[1];
@@ -500,7 +515,7 @@ export const deleteHealthcareRequest = async (req, res) => {
   }
 };
 
-export const createAnnouncement = async (req, res) => {
+export const createAnnouncement = [checkApproval, async (req, res) => {
   const { title, content } = req.body;
 
   try {
@@ -523,7 +538,7 @@ export const createAnnouncement = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
-};
+}];
 
 export const getAllAnnouncements = async (req, res) => {
   try {
