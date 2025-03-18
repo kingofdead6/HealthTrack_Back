@@ -206,10 +206,130 @@ export const getCurrentUser = async (req, res) => {
         isApproved: user.isApproved,
         phone_number: user.phone_number,
         profile_image: user.profile_image,
+        isBanned: user.isBanned,
       },
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAllUsers = async (req, res) => {
+  try {
+    if (req.user.user_type !== "admin") {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
+
+    const users = await userModel.find().select(
+      "_id name email user_type profile_image isBanned createdAt"
+    );
+
+    const usersWithDetails = await Promise.all(
+      users.map(async (user) => {
+        if (user.user_type === "healthcare") {
+          const healthcare = await HealthCare.findOne({ user_id: user._id });
+          return {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            user_type: user.user_type,
+            profile_image: user.profile_image,
+            isBanned: user.isBanned,
+            healthcare_type: healthcare ? healthcare.healthcare_type : "N/A",
+            createdAt: user.createdAt,
+          };
+        }
+        return {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          user_type: user.user_type,
+          profile_image: user.profile_image,
+          isBanned: user.isBanned,
+          healthcare_type: "N/A",
+        };
+      })
+    );
+
+    res.status(200).json({ users: usersWithDetails });
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ message: "Server error while fetching users" });
+  }
+};
+
+export const banUser = async (req, res) => {
+  try {
+    if (req.user.user_type !== "admin") {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
+
+    const userId = req.params.userId;
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await userModel.findByIdAndUpdate(userId, { 
+      isBanned: true,
+      bannedAt: new Date() // Set bannedAt timestamp
+    });
+    res.status(200).json({ message: "User banned successfully" });
+  } catch (error) {
+    console.error("Error banning user:", error);
+    res.status(500).json({ message: "Server error while banning user" });
+  }
+};
+
+export const unbanUser = async (req, res) => {
+  try {
+    if (req.user.user_type !== "admin") {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
+
+    const userId = req.params.userId;
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await userModel.findByIdAndUpdate(userId, { 
+      isBanned: false,
+      bannedAt: null // Reset bannedAt timestamp
+    });
+    res.status(200).json({ message: "User unbanned successfully" });
+  } catch (error) {
+    console.error("Error unbanning user:", error);
+    res.status(500).json({ message: "Server error while unbanning user" });
+  }
+};
+
+export const deleteUser = async (req, res) => {
+  try {
+    if (req.user.user_type !== "admin") {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
+
+    const userId = req.params.userId;
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.user_type === "healthcare") {
+      const healthcare = await HealthCare.findOne({ user_id: userId });
+      if (healthcare) {
+        await HealthCare.findByIdAndDelete(healthcare._id);
+      }
+    } else if (user.user_type === "patient") {
+      await Patient.findOneAndDelete({ user_id: userId });
+    }
+
+    await userModel.findByIdAndDelete(userId);
+    res.status(200).json({ message: "User deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ message: "Server error while deleting user" });
   }
 };

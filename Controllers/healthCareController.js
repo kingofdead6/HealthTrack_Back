@@ -109,6 +109,54 @@ export const approveHealthCare = async (req, res) => {
   }
 };
 
+export const rejectHealthCare = async (req, res) => {
+  const { userId } = req.body;
+
+  try {
+    const user = await userModel.findById(userId);
+    if (!user || user.user_type !== "healthcare") {
+      return res.status(404).json({ message: "User not found or not a healthcare provider" });
+    }
+
+    const healthcare = await HealthCare.findOne({ user_id: userId });
+    if (!healthcare) {
+      return res.status(404).json({ message: "Healthcare record not found" });
+    }
+
+    switch (healthcare.healthcare_type) {
+      case "doctor":
+        await Doctor.deleteOne({ healthcare_id: healthcare._id });
+        break;
+      case "nurse":
+        await Nurse.deleteOne({ healthcare_id: healthcare._id });
+        break;
+      case "pharmacy":
+        await Pharmacy.deleteOne({ healthcare_id: healthcare._id });
+        break;
+      case "laboratory":
+        await Laboratory.deleteOne({ healthcare_id: healthcare._id });
+        break;
+      default:
+        break;
+    }
+
+    await HealthCare.deleteOne({ user_id: userId });
+    const subject = "Sorry, Your Application Has Been Rejected";
+    const html = `
+      <p>Dear ${user.name},</p>
+      <p>We regret to inform you that your application to join the MedTrack platform as a healthcare provider has been rejected.</p>
+      <p>If you have any questions or need further clarification, please contact our support team.</p>
+      <p>Best regards,<br>The MedTrack Team</p>
+    `;
+    await sendEmail(user.email, subject, html);
+    await userModel.deleteOne({ _id: userId });
+    res.status(200).json({ message: "Healthcare provider rejected and account deleted successfully" });
+  } catch (error) {
+    console.error("Error rejecting healthcare provider:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getHealthCareDetails = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -280,44 +328,34 @@ export const getHealthcareProfile = async (req, res) => {
   const { healthcareId } = req.params;
 
   try {
-    console.log("Searching HealthCare collection for user_id:", healthcareId);
     const healthcare = await HealthCare.findOne({ user_id: healthcareId });
     if (!healthcare) {
-      console.log("No healthcare profile found for user_id:", healthcareId);
       return res.status(404).json({ message: "Healthcare profile not found" });
     }
 
-    console.log("Fetching user details for _id:", healthcareId);
-    const healthcareUser = await userModel.findById(healthcareId).select("name email phone_number user_type profile_image");
+    const healthcareUser = await userModel.findById(healthcareId).select("name email phone_number user_type profile_image isBanned");
     if (!healthcareUser || healthcareUser.user_type !== "healthcare") {
-      console.log("User details:", healthcareUser);
       return res.status(404).json({ message: "Healthcare provider not found" });
     }
 
     let typeSpecificData = {};
     switch (healthcare.healthcare_type) {
       case "doctor":
-        console.log("Fetching Doctor data for healthcare_id:", healthcare._id);
         typeSpecificData = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name");
         break;
       case "nurse":
-        console.log("Fetching Nurse data for healthcare_id:", healthcare._id);
         typeSpecificData = await Nurse.findOne({ healthcare_id: healthcare._id }).select("ward clinic_name");
         break;
       case "pharmacy":
-        console.log("Fetching Pharmacy data for healthcare_id:", healthcare._id);
         typeSpecificData = await Pharmacy.findOne({ healthcare_id: healthcare._id }).select("pharmacy_name");
         break;
       case "laboratory":
-        console.log("Fetching Laboratory data for healthcare_id:", healthcare._id);
         typeSpecificData = await Laboratory.findOne({ healthcare_id: healthcare._id }).select("lab_name equipment clinic_name");
         break;
       default:
-        console.log("No specific type data for healthcare_type:", healthcare.healthcare_type);
         break;
     }
 
-    console.log("Fetching appointments for user_id:", healthcareId);
     const appointments = await Appointment.find({
       user_id: healthcareId,
       status: "completed",
@@ -343,15 +381,14 @@ export const getHealthcareProfile = async (req, res) => {
       location_link: healthcare.location_link || "Not provided",
       working_hours: healthcare.working_hours || "Not specified",
       can_deliver: healthcare.can_deliver || false,
+      isBanned: healthcareUser.isBanned || false,
       ...typeSpecificData?._doc,
       averageRating,
       comments,
     };
 
-    console.log("Profile data:", profile);
     res.status(200).json(profile);
   } catch (error) {
-    console.error("Error fetching healthcare profile:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -471,7 +508,10 @@ export const createAnnouncement = async (req, res) => {
     if (!user || user.user_type !== "healthcare") {
       return res.status(403).json({ message: "Unauthorized: Only healthcare providers can create announcements" });
     }
-
+    const healthcare = await userModel.findById(user_id);
+        if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved || healthcare.isBanned) {
+          return res.status(404).json({ message: "Healthcare provider not found, not approved, or banned" });
+        }
     const announcement = new Announcement({
       title,
       content,
@@ -479,10 +519,8 @@ export const createAnnouncement = async (req, res) => {
     });
 
     await announcement.save();
-    console.log("Announcement created:", announcement);
     res.status(201).json({ message: "Announcement created successfully", announcement });
   } catch (error) {
-    console.error("Error creating announcement:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 };

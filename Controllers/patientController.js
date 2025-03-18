@@ -122,7 +122,7 @@ export const updatePatientProfile = async (req, res) => {
 
 export const getPatientProfile = async (req, res) => {
     try {
-      const patient = await Patient.findOne({ user_id: req.user._id }).populate("user_id", "name email phone_number profile_image");
+      const patient = await Patient.findOne({ user_id: req.user._id }).populate("user_id", "name email phone_number profile_image isBanned");
       if (!patient) {
         return res.status(404).json({ message: "Patient profile not found" });
       }
@@ -351,7 +351,7 @@ export const getPatientProfileById = async (req, res) => {
 
     const patient = await Patient.findOne({ user_id: patientId }).populate(
       "user_id",
-      "name email phone_number profile_image"
+      "name email phone_number profile_image isBanned"
     );
     if (!patient) {
       return res.status(404).json({ message: "Patient profile not found" });
@@ -383,9 +383,14 @@ export const createAppointment = async (req, res) => {
   const { user_id, date, time, message, duration } = req.body;
 
   try {
+    const patient = await userModel.findById(req.user._id);
+    if (patient.isBanned) {
+      return res.status(403).json({ message: "Banned users cannot create appointments" });
+    }
+
     const healthcare = await userModel.findById(user_id);
-    if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved) {
-      return res.status(404).json({ message: "Healthcare provider not found or not approved" });
+    if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved || healthcare.isBanned) {
+      return res.status(404).json({ message: "Healthcare provider not found, not approved, or banned" });
     }
 
     const healthcareDetails = await HealthCare.findOne({ user_id });
@@ -414,7 +419,7 @@ export const createAppointment = async (req, res) => {
 
     const existingAppointments = await Appointment.find({
       user_id,
-      status: { $in: ["pending", "active"] }, 
+      status: { $in: ["pending", "active"] },
       date: { $lt: apptEnd },
       $or: [
         { date: { $gte: apptDate } },
@@ -480,3 +485,4 @@ export const getHealthcareAvailability = async (req, res) => {
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
+

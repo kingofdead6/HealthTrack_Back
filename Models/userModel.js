@@ -9,6 +9,9 @@ const UserSchema = new mongoose.Schema(
     user_type: { type: String, enum: ["patient", "healthcare", "admin", null], default: null },
     isApproved: { type: Boolean, default: false },
     profile_image: { type: String, default: null },
+    isBanned: { type: Boolean, default: false },
+    bannedAt: { type: Date, default: null },
+    createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
