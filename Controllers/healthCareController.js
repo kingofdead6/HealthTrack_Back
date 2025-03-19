@@ -515,30 +515,34 @@ export const deleteHealthcareRequest = async (req, res) => {
   }
 };
 
-export const createAnnouncement = [checkApproval, async (req, res) => {
-  const { title, content } = req.body;
+export const createAnnouncement = [
+  checkApproval,
+  async (req, res) => {
+    const { title, content } = req.body;
 
-  try {
-    const user = await userModel.findById(req.user._id);
-    if (!user || user.user_type !== "healthcare") {
-      return res.status(403).json({ message: "Unauthorized: Only healthcare providers can create announcements" });
+    try {
+      const user = await userModel.findById(req.user._id);
+      if (!user || user.user_type !== "healthcare") {
+        return res.status(403).json({ message: "Unauthorized: Only healthcare providers can create announcements" });
+      }
+
+      if (!user.isApproved || user.isBanned) {
+        return res.status(403).json({ message: "Account not approved or banned" });
+      }
+
+      const announcement = new Announcement({
+        title,
+        content,
+        healthcare_id: req.user._id,
+      });
+
+      await announcement.save();
+      res.status(201).json({ message: "Announcement created successfully", announcement });
+    } catch (error) {
+      res.status(500).json({ message: `Server error: ${error.message}` });
     }
-    const healthcare = await userModel.findById(user_id);
-        if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved || healthcare.isBanned) {
-          return res.status(404).json({ message: "Healthcare provider not found, not approved, or banned" });
-        }
-    const announcement = new Announcement({
-      title,
-      content,
-      healthcare_id: req.user._id,
-    });
-
-    await announcement.save();
-    res.status(201).json({ message: "Announcement created successfully", announcement });
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
-  }
-}];
+  },
+];
 
 export const getAllAnnouncements = async (req, res) => {
   try {

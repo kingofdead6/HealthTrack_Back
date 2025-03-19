@@ -273,7 +273,7 @@ export const banUser = async (req, res) => {
 
     await userModel.findByIdAndUpdate(userId, { 
       isBanned: true,
-      bannedAt: new Date() // Set bannedAt timestamp
+      bannedAt: new Date() 
     });
     res.status(200).json({ message: "User banned successfully" });
   } catch (error) {
