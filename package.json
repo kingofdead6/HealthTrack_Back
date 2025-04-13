@@ -25,6 +25,7 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.10.0",
     "server": "file:",
+    "socket.io": "^4.8.1",
     "validator": "^13.12.0"
   }
 }

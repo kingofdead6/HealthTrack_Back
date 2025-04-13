@@ -8,6 +8,10 @@ import Appointment from "../Models/appointmentModel.js";
 import Announcement from "../Models/announcementModel.js";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import Chat from "../Models/chatModel.js";
+import Notification from "../Models/notificationModel.js";
+
+
 
 const sendEmail = async (toEmail, subject, html) => {
   const transporter = nodemailer.createTransport({
@@ -288,55 +292,138 @@ export const getHealthcareAppointments = async (req, res) => {
   }
 };
 
-export const updateAppointmentStatus = [checkApproval, async (req, res) => {
-  const { appointmentId } = req.params;
-  const { status } = req.body;
+export const updateAppointmentStatus = [
+  async (req, res) => {
+    const { appointmentId } = req.params;
+    const { status } = req.body;
 
-  try {
-    const appointment = await Appointment.findById(appointmentId)
-      .populate("patient_id", "name email") 
-      .populate("user_id", "name"); 
-          if (!appointment) {
-      return res.status(404).json({ message: "Appointment not found" });
-    }
-    
+    try {
+      const appointment = await Appointment.findById(appointmentId)
+        .populate("patient_id", "name email")
+        .populate("user_id", "name");
 
-    const validStatuses = ["pending", "active", "completed", "rejected"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status value" });
-    }
-    if (status === "active" && appointment.status !== "pending") {
-      return res.status(400).json({ message: "Only pending appointments can be validated to active" });
-    }
-    if (status === "rejected" && appointment.status !== "pending") {
-      return res.status(400).json({ message: "Only pending appointments can be rejected" });
-    }
+      if (!appointment) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
 
-    appointment.status = status;
-    await appointment.save();
+      const validStatuses = ["pending", "active", "completed", "rejected"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ message: "Invalid status value" });
+      }
 
-    if (status === "rejected") {
-      const patientEmail = appointment.patient_id.email;
-      const healthcareName = appointment.user_id.name;
-      const subject = "Appointment Rejected";
-      const html = `
-        <p>Dear ${appointment.patient_id.name},</p>
-        <p>Your appointment scheduled for <strong>${new Date(appointment.date).toLocaleDateString()} at ${appointment.time}</strong> with <strong>${healthcareName}</strong> has been rejected.</p>
-        <p>Reason: Unspecified (contact the provider for details).</p>
-        <p>Please schedule a new appointment if needed.</p>
-        <p>Best regards,<br>Your Healthcare Team</p>
-      `;
-      await sendEmail(patientEmail, subject, html);
-      console.log(`Rejection email sent to ${patientEmail}`);
+      if (status === "active" && appointment.status !== "pending") {
+        return res.status(400).json({ message: "Only pending appointments can be validated to active" });
+      }
+
+      if (status === "rejected" && appointment.status !== "pending") {
+        return res.status(400).json({ message: "Only pending appointments can be rejected" });
+      }
+
+      appointment.status = status;
+      await appointment.save();
+
+      const io = req.app.get("io");
+      const users = req.app.get("users");
+
+      if (status === "active") {
+        // Check for existing chat by patient_id and healthcare_id
+        const existingChat = await Chat.findOne({
+          patient_id: appointment.patient_id._id,
+          healthcare_id: appointment.user_id._id,
+        });
+
+        let chatId;
+        if (!existingChat) {
+          // Create new chat if none exists
+          const chat = new Chat({
+            patient_id: appointment.patient_id._id,
+            healthcare_id: appointment.user_id._id,
+            appointment_ids: [appointmentId], // Store appointment ID in an array
+          });
+          await chat.save();
+          chatId = chat._id;
+        } else {
+          // Update existing chat to include this appointment ID
+          existingChat.appointment_ids = existingChat.appointment_ids || [];
+          if (!existingChat.appointment_ids.includes(appointmentId)) {
+            existingChat.appointment_ids.push(appointmentId);
+            await existingChat.save();
+          }
+          chatId = existingChat._id;
+        }
+
+        // Notify patient
+        const patientNotification = new Notification({
+          user_id: appointment.patient_id._id,
+          type: "appointment_accepted",
+          message: `Your appointment with ${appointment.user_id.name} on ${new Date(
+            appointment.date
+          ).toLocaleDateString()} at ${appointment.time} has been accepted. Chat is now open.`,
+          related_id: appointment._id,
+        });
+        await patientNotification.save();
+
+        const patientSocket = users.get(appointment.patient_id._id.toString());
+        if (patientSocket) {
+          io.to(patientSocket).emit("receive_notification", patientNotification);
+        }
+
+        // Send email to patient
+        const patientEmail = appointment.patient_id.email;
+        await sendEmail(
+          patientEmail,
+          "Appointment Accepted",
+          `
+            <p>Dear ${appointment.patient_id.name},</p>
+            <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
+              appointment.date
+            ).toLocaleDateString()} at ${appointment.time}</strong> has been accepted.</p>
+            <p>You can now chat with your doctor through the platform.</p>
+            <p>Best regards,<br>The MedTrack Team</p>
+          `
+        );
+      }
+
+      if (status === "rejected") {
+        // Notify patient
+        const patientNotification = new Notification({
+          user_id: appointment.patient_id._id,
+          type: "appointment_rejected",
+          message: `Your appointment with ${appointment.user_id.name} on ${new Date(
+            appointment.date
+          ).toLocaleDateString()} at ${appointment.time} was rejected.`,
+          related_id: appointment._id,
+        });
+        await patientNotification.save();
+
+        const patientSocket = users.get(appointment.patient_id._id.toString());
+        if (patientSocket) {
+          io.to(patientSocket).emit("receive_notification", patientNotification);
+        }
+
+        // Send rejection email
+        const patientEmail = appointment.patient_id.email;
+        await sendEmail(
+          patientEmail,
+          "Appointment Rejected",
+          `
+            <p>Dear ${appointment.patient_id.name},</p>
+            <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
+              appointment.date
+            ).toLocaleDateString()} at ${appointment.time}</strong> has been rejected.</p>
+            <p>Please schedule a new appointment if needed.</p>
+            <p>Best regards,<br>The MedTrack Team</p>
+          `
+        );
+      }
+
+      res.status(200).json({ message: "Appointment status updated", appointment });
+    } catch (error) {
+      console.error("Error updating appointment:", error.message, error.stack);
+      res.status(500).json({ message: "Server error" });
     }
-
-    console.log("Updated appointment status:", appointment);
-    res.status(200).json({ message: "Appointment status updated", appointment });
-  } catch (error) {
-    console.error("Error updating appointment:", error.message, error.stack);
-    res.status(500).json({ message: `Server error: ${error.message}` });
-  }
-}];
+  },
+];
 
 export const getHealthcareProfile = async (req, res) => {
   const { healthcareId } = req.params;

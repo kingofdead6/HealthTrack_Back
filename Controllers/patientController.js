@@ -6,13 +6,34 @@ import Doctor from "../Models/doctorModel.js";
 import Nurse from "../Models/nurseModel.js";
 import Pharmacy from "../Models/pharmacyModel.js"; 
 import Laboratory from "../Models/laboratoryModel.js";
+import Notification from "../Models/notificationModel.js";
 import Patient from "../Models/patientModel.js";
 import userModel from "../Models/userModel.js";
 import Announcement from "../Models/announcementModel.js";
 import Appointment from "../Models/appointmentModel.js";
 import fs from "fs/promises"; 
 import path from "path";
+import nodemailer from "nodemailer";
 
+
+const sendEmail = async (toEmail, subject, html) => {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: toEmail,
+    subject,
+    html,
+  };
+
+  await transporter.sendMail(mailOptions);
+};
 export const requestAccountDeletion = async (req, res) => {
   try {
     const user = await userModel.findById(req.user._id);
@@ -449,6 +470,38 @@ export const createAppointment = async (req, res) => {
     });
 
     await appointment.save();
+
+    // Notify healthcare provider
+    const notification = new Notification({
+      user_id: user_id,
+      type: "appointment_request",
+      message: `New appointment request from ${patient.name} on ${new Date(date).toLocaleDateString()} at ${time}`,
+      related_id: appointment._id,
+    });
+    await notification.save();
+
+    // Emit notification via Socket.IO
+    const io = req.app.get("io");
+    const users = req.app.get("users"); // Access users from app
+    const recipientSocket = users.get(user_id.toString());
+    if (recipientSocket) {
+      io.to(recipientSocket).emit("receive_notification", notification);
+    }
+
+    // Send email to healthcare provider
+    await sendEmail(
+      healthcare.email,
+      "New Appointment Request",
+      `
+        <p>Dear ${healthcare.name},</p>
+        <p>You have a new appointment request from <strong>${patient.name}</strong> on <strong>${new Date(
+          date
+        ).toLocaleDateString()} at ${time}</strong>.</p>
+        <p>Please review and accept or reject the appointment through the platform.</p>
+        <p>Best regards,<br>The MedTrack Team</p>
+      `
+    );
+
     res.status(201).json({ message: "Appointment request sent successfully", appointment });
   } catch (error) {
     console.error("Error creating appointment:", error.message, error.stack);
