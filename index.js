@@ -15,11 +15,11 @@ dotenv.config();
 
 const app = express();
 const server = createServer(app);
-const io = setupSocket(server, app); // Pass app to setupSocket
+const io = setupSocket(server, app);
 
-app.set("io", io); // Store io instance in app
+app.set("io", io); 
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.use(cors({ origin: process.env.FRONTEND_URL , credentials: true }));
 app.use(express.json());
 app.use("/Uploads", express.static("Uploads"));
 

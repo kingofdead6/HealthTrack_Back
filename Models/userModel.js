@@ -12,6 +12,8 @@ const UserSchema = new mongoose.Schema(
     isBanned: { type: Boolean, default: false },
     bannedAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now },
+    resetToken: { type: String },
+    resetTokenExpires: { type: Date },
   },
   { timestamps: true }
 );

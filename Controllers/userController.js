@@ -22,14 +22,12 @@ const sendEmail = async (toEmail, subject, html) => {
       pass: process.env.EMAIL_PASS,
     },
   });
-
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: toEmail,
     subject,
     html,
   };
-
   try {
     await transporter.sendMail(mailOptions);
     console.log(`Email sent successfully to ${toEmail}`);
@@ -277,7 +275,6 @@ export const banUser = async (req, res) => {
     });
     res.status(200).json({ message: "User banned successfully" });
   } catch (error) {
-    console.error("Error banning user:", error);
     res.status(500).json({ message: "Server error while banning user" });
   }
 };
@@ -296,11 +293,10 @@ export const unbanUser = async (req, res) => {
 
     await userModel.findByIdAndUpdate(userId, { 
       isBanned: false,
-      bannedAt: null // Reset bannedAt timestamp
+      bannedAt: null 
     });
     res.status(200).json({ message: "User unbanned successfully" });
   } catch (error) {
-    console.error("Error unbanning user:", error);
     res.status(500).json({ message: "Server error while unbanning user" });
   }
 };
@@ -329,7 +325,75 @@ export const deleteUser = async (req, res) => {
     await userModel.findByIdAndDelete(userId);
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
-    console.error("Error deleting user:", error);
     res.status(500).json({ message: "Server error while deleting user" });
+  }
+};
+
+export const requestPasswordReset = async (req, res) => {
+  const { email } = req.body;
+  try {
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const resetToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+    user.resetToken = resetToken;
+    user.resetTokenExpires = Date.now() + 3600000;
+    await user.save();
+    const resetUrl = `${process.env.FRONTEND_URL}/change-password?token=${resetToken}`;
+    const html = `
+      <p>You requested a password reset. Click the link below to reset your password:</p>
+      <a href="${resetUrl}"><button style="padding: 10px 20px; background-color: #A5CCFF; color: white; border: none; border-radius: 5px;">Reset Password</button></a>
+      <p>This link will expire in 1 hour.</p>
+    `;
+    await sendEmail(email, "Password Reset Request", html);
+    res.status(200).json({ message: "Password reset email sent" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error during password reset request" });
+  }
+};
+
+export const changePassword = async (req, res) => {
+  const { password, token } = req.body;
+
+  try {
+    if (!password || !token) {
+      return res.status(400).json({ message: "Password and token are required" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    const user = await userModel.findById(decoded._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.resetToken !== token || user.resetTokenExpires < Date.now()) {
+      return res.status(400).json({ message: "Invalid or expired token" });
+    }
+
+    if (!validator.isStrongPassword(password, { minSymbols: 0 })) {
+      return res.status(400).json({ message: "Password must be strong" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashed_password = await bcrypt.hash(password, salt);
+
+    user.hashed_password = hashed_password;
+    user.resetToken = null;
+    user.resetTokenExpires = null;
+    await user.save();
+
+    res.status(200).json({ message: "Password reset successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error during password reset" });
   }
 };
