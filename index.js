@@ -19,7 +19,7 @@ const io = setupSocket(server, app);
 
 app.set("io", io); 
 
-app.use(cors({ origin: process.env.FRONTEND_URL , credentials: true }));
+app.use(cors());
 app.use(express.json());
 app.use("/Uploads", express.static("Uploads"));
 
