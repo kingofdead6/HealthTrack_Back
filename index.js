@@ -6,6 +6,7 @@ import userRoute from "./Routes/userRoute.js";
 import patientRoute from "./Routes/patientRoute.js";
 import healthCareRoute from "./Routes/healthCareRoute.js";
 import chatRoute from "./Routes/chatRoute.js";
+import adminRoute from "./Routes/adminRoute.js";
 import notificationRoute from "./Routes/notificationRoute.js";
 import setupSocket from "./sockets/socket.js";
 import { createServer } from "http";
@@ -27,6 +28,7 @@ app.use("/api/patients", patientRoute);
 app.use("/api/healthcare", healthCareRoute);
 app.use("/api/chats", chatRoute);
 app.use("/api/notifications", notificationRoute);
+app.use("/api/admin", adminRoute);
 
 mongoose
   .connect(process.env.MONGODB_URI)

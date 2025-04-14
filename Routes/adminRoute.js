@@ -1,6 +1,16 @@
 import express from "express";
-import { getPendingHealthCare, approveHealthCare, rejectHealthCare } from "../Controllers/healthCareController.js";
-import { getAllRates, deleteReview } from "../Controllers/AdminController.js";
+import {
+  getPendingHealthCare,
+  approveHealthCare,
+  rejectHealthCare,
+} from "../Controllers/healthCareController.js";
+import {
+  getAllRates,
+  deleteReview,
+  banUser,
+  unbanUser,
+  deleteUser,
+} from "../Controllers/AdminController.js";
 import adminMiddleware from "../Middleware/adminMiddleware.js";
 
 const router = express.Router();
@@ -10,6 +20,8 @@ router.post("/healthcare/approve", adminMiddleware, approveHealthCare);
 router.post("/healthcare/reject", adminMiddleware, rejectHealthCare);
 router.get("/reviews", adminMiddleware, getAllRates);
 router.post("/reviews/delete", adminMiddleware, deleteReview);
-
+router.patch("/users/ban/:patientId", adminMiddleware, banUser);
+router.patch("/users/unban/:patientId", adminMiddleware, unbanUser);
+router.delete("/users/delete/:patientId", adminMiddleware, deleteUser);
 
 export default router;

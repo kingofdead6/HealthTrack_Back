@@ -17,19 +17,11 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "video/mp4",
-      "video/mpeg",
-      "application/pdf",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ];
+    const allowedTypes = ["image/jpeg", "image/png"];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Invalid file type"), false);
+      cb(new Error("Only images (JPEG, PNG) are allowed"), false);
     }
   },
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
@@ -151,91 +143,98 @@ export const getChatMessages = async (req, res) => {
 };
 
 export const sendMessage = [
-    upload.single("file"),
-    async (req, res) => {
-      const { chatId } = req.params; // Use params for chatId
-      const { content } = req.body;
-      const senderId = req.user._id;
-      const file = req.file;
-  
-      // Debugging: Log the incoming request
-      console.log("sendMessage called with:", { chatId, content, senderId, file });
-  
-      try {
-        // Validate chatId
-        if (!chatId) {
-          console.error("Missing chatId");
-          return res.status(400).json({ message: "Chat ID is required" });
-        }
-  
-        const chat = await Chat.findById(chatId)
-          .populate("patient_id", "name")
-          .populate("healthcare_id", "name");
-        if (!chat) {
-          console.error("Chat not found for ID:", chatId);
-          return res.status(404).json({ message: "Chat not found" });
-        }
-  
-        if (
-          chat.patient_id._id.toString() !== senderId.toString() &&
-          chat.healthcare_id._id.toString() !== senderId.toString()
-        ) {
-          console.error("Unauthorized access attempt by:", senderId);
-          return res.status(403).json({ message: "Unauthorized" });
-        }
-  
-        let fileUrl = null;
-        let fileType = null;
-        if (file) {
-          fileUrl = `/Uploads/messages/${file.filename}`;
-          if (file.mimetype.startsWith("image/")) fileType = "image";
-          else if (file.mimetype.startsWith("video/")) fileType = "video";
-          else if (file.mimetype === "application/pdf") fileType = "pdf";
-          else fileType = "file";
-        }
-  
-        const message = new Message({
-          chat_id: chatId,
-          sender_id: senderId,
-          content: content || null,
-          file_url: fileUrl,
-          file_type: fileType,
-        });
-        await message.save();
-  
-        const populatedMessage = await Message.findById(message._id)
-          .populate("sender_id", "name profile_image");
-  
-        const io = req.app.get("io");
-        io.to(chatId).emit("receive_message", populatedMessage);
-  
-        const recipientId =
-          chat.patient_id._id.toString() === senderId.toString()
-            ? chat.healthcare_id._id
-            : chat.patient_id._id;
-        const senderName =
-          chat.patient_id._id.toString() === senderId.toString()
-            ? chat.patient_id.name
-            : chat.healthcare_id.name;
-  
-        const notification = new Notification({
-          user_id: recipientId,
-          type: "new_message",
-          message: `New message from ${senderName}`,
-          related_id: chatId,
-        });
-        await notification.save();
-  
-        const users = req.app.get("users");
-        const recipientSocket = users.get(recipientId.toString());
-        if (recipientSocket) {
-          io.to(recipientSocket).emit("receive_notification", notification);
-        }
-  
-        res.status(201).json({ message: "Message sent successfully", message: populatedMessage });
-      } catch (error) {
-        console.error("Error sending message:", error);
-        res.status(500).json({ message: "Server error", error: error.message });
+  upload.single("file"),
+  async (req, res) => {
+    const { chatId } = req.params;
+    const { content, tempId } = req.body;
+    const senderId = req.user._id;
+    const file = req.file;
+
+    console.log("sendMessage called with:", { chatId, content, tempId, senderId, file });
+
+    try {
+      if (!chatId) {
+        console.error("Missing chatId");
+        return res.status(400).json({ message: "Chat ID is required" });
       }
-    },
-  ];
+
+      const chat = await Chat.findById(chatId)
+        .populate("patient_id", "name")
+        .populate("healthcare_id", "name");
+      if (!chat) {
+        console.error("Chat not found for ID:", chatId);
+        return res.status(404).json({ message: "Chat not found" });
+      }
+
+      if (
+        chat.patient_id._id.toString() !== senderId.toString() &&
+        chat.healthcare_id._id.toString() !== senderId.toString()
+      ) {
+        console.error("Unauthorized access attempt by:", senderId);
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+
+      let fileUrl = null;
+      let fileType = null;
+      if (file) {
+        fileUrl = `/Uploads/messages/${file.filename}`;
+        fileType = "image";
+      }
+
+      const message = new Message({
+        chat_id: chatId,
+        sender_id: senderId,
+        content: content || null,
+        file_url: fileUrl,
+        file_type: fileType,
+      });
+      await message.save();
+
+      const populatedMessage = await Message.findById(message._id).populate(
+        "sender_id",
+        "name profile_image"
+      );
+
+      const io = req.app.get("io");
+      const messagePayload = {
+        ...populatedMessage.toObject(),
+        chat_id: chatId,
+        tempId,
+      };
+      console.log("Emitting receive_message:", messagePayload);
+      io.to(chatId).emit("receive_message", messagePayload);
+
+      const recipientId =
+        chat.patient_id._id.toString() === senderId.toString()
+          ? chat.healthcare_id._id
+          : chat.patient_id._id;
+      const senderName =
+        chat.patient_id._id.toString() === senderId.toString()
+          ? chat.patient_id.name
+          : chat.healthcare_id.name;
+
+      const notification = new Notification({
+        user_id: recipientId,
+        type: "new_message",
+        message: `New message from ${senderName}`,
+        related_id: chatId,
+        read: false,
+      });
+      await notification.save();
+
+      const users = req.app.get("users");
+      const recipientSocket = users.get(recipientId.toString());
+      if (recipientSocket) {
+        io.to(recipientSocket).emit("receive_notification", notification);
+      }
+
+      res.status(201).json({
+        message: "Message sent successfully",
+        message: populatedMessage,
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
+  },
+];
