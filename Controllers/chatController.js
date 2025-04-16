@@ -1,10 +1,10 @@
 import Chat from "../Models/chatModel.js";
 import Message from "../Models/messageModel.js";
 import Appointment from "../Models/appointmentModel.js";
-import userModel from "../Models/userModel.js";
 import Notification from "../Models/notificationModel.js";
 import multer from "multer";
 import cloudinary from "../cloudinary.js";
+import { PassThrough } from "stream";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -16,7 +16,7 @@ const upload = multer({
       cb(new Error("Only JPEG, PNG, and PDF files are allowed"), false);
     }
   },
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
 export const createChat = async (req, res) => {
@@ -166,34 +166,47 @@ export const sendMessage = [
       }
 
       let fileUrl = null;
+      let thumbnailUrl = null;
       let fileType = null;
+      let publicId = null;
+
       if (file) {
-        const resourceType = file.mimetype === "application/pdf" ? "raw" : "image";
-        const allowedFormats = resourceType === "image" ? ["jpg", "png"] : ["pdf"];
-        const publicId = `${senderId}_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9]/g, "_")}${
-          resourceType === "raw" ? ".pdf" : ""
-        }`;
+        const isPDF = file.mimetype === "application/pdf";
+        publicId = `${senderId}_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
-        const uploadResult = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            {
-              folder: `messages/${chatId}`,
-              public_id: publicId,
-              resource_type: resourceType,
-              allowed_formats: allowedFormats,
-            },
-            (error, result) => {
-              if (error) {
-                return reject(error);
+        try {
+          const uploadResult = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: `messages/${chatId}`,
+                public_id: publicId,
+                resource_type: isPDF ? "raw" : "auto",
+                transformation: isPDF ? [] : [{ quality: "auto" }],
+              },
+              (error, result) => {
+                if (error) {
+                  console.error("Cloudinary upload error:", error);
+                  return reject(error);
+                }
+                resolve(result);
               }
-              resolve(result);
-            }
-          );
-          stream.end(file.buffer);
-        });
+            );
+            stream.end(file.buffer);
+          });
 
-        fileUrl = uploadResult.secure_url;
-        fileType = resourceType === "image" ? "image" : "pdf";
+          fileUrl = uploadResult.secure_url;
+          fileType = isPDF ? "pdf" : "image";
+          thumbnailUrl = isPDF
+            ? cloudinary.url(publicId, {
+                resource_type: "image",
+                format: "jpg",
+                transformation: [{ page: 1 }, { quality: "auto" }],
+              })
+            : fileUrl;
+        } catch (error) {
+          console.error("File upload error:", error);
+          return res.status(500).json({ message: "Failed to upload file", error: error.message });
+        }
       }
 
       const message = new Message({
@@ -201,10 +214,13 @@ export const sendMessage = [
         sender_id: senderId,
         content: content || null,
         file_url: fileUrl,
+        thumbnail_url: thumbnailUrl,
         file_type: fileType,
+        public_id: publicId,
         replyTo: replyTo || null,
         seenBy: [senderId],
       });
+
       await message.save();
 
       const populatedMessage = await Message.findById(message._id)
@@ -253,6 +269,55 @@ export const sendMessage = [
     }
   },
 ];
+
+export const editMessage = async (req, res) => {
+  const { chatId, messageId } = req.params;
+  const { content } = req.body;
+  const userId = req.user._id;
+
+  try {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: "Chat not found" });
+    }
+
+    if (
+      chat.patient_id.toString() !== userId.toString() &&
+      chat.healthcare_id.toString() !== userId.toString()
+    ) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.sender_id.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "You can only edit your own messages" });
+    }
+
+    if (message.file_url) {
+      return res.status(400).json({ message: "Cannot edit messages with files" });
+    }
+
+    message.content = content;
+    message.updatedAt = new Date();
+    await message.save();
+
+    const populatedMessage = await Message.findById(message._id)
+      .populate("sender_id", "name profile_image")
+      .populate("replyTo", "content sender_id");
+
+    const io = req.app.get("io");
+    io.to(chatId).emit("message_updated", populatedMessage);
+
+    res.status(200).json({ message: "Message updated successfully", message: populatedMessage });
+  } catch (error) {
+    console.error("Error editing message:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 export const deleteMessage = async (req, res) => {
   const { chatId, messageId } = req.params;
@@ -324,5 +389,68 @@ export const markMessageSeen = async (req, res) => {
   } catch (error) {
     console.error("Error marking messages as seen:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+export const downloadFile = async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user._id;
+
+  try {
+    const message = await Message.findById(messageId).populate("chat_id");
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    const chat = message.chat_id;
+    if (!chat) {
+      return res.status(404).json({ message: "Chat not found" });
+    }
+
+    if (
+      chat.patient_id.toString() !== userId.toString() &&
+      chat.healthcare_id.toString() !== userId.toString()
+    ) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (!message.file_url || message.file_type !== "pdf") {
+      return res.status(400).json({ message: "No PDF file associated with this message" });
+    }
+
+    if (!message.public_id) {
+      return res.status(400).json({ message: "No public ID associated with this message" });
+    }
+
+    const pdfUrl = cloudinary.url(message.public_id, {
+      resource_type: "raw",
+      sign_url: true,
+      attachment: true,
+      flags: "attachment",
+    });
+
+    const fileResponse = await fetch(pdfUrl, {
+      method: "GET",
+      headers: { Accept: "application/pdf" },
+    });
+
+    if (!fileResponse.ok) {
+      throw new Error(`Failed to fetch file from Cloudinary: ${fileResponse.statusText}`);
+    }
+
+    const contentType = fileResponse.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/pdf")) {
+      throw new Error("Received file is not a PDF");
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="document-${messageId}.pdf"`);
+
+    const stream = new PassThrough();
+    fileResponse.body.pipe(stream);
+    stream.pipe(res);
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    res.status(500).json({ message: "Failed to download file", error: error.message });
   }
 };

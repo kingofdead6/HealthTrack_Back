@@ -72,3 +72,14 @@ export const deleteNotification = async (req, res) => {
   }
 };
 
+export const deleteAllNotifications = async (req, res) => {
+  try {
+    console.log("Deleting all notifications for user:", req.user._id);
+    const result = await Notification.deleteMany({ user_id: req.user._id });
+    console.log("Notifications deleted:", result.deletedCount);
+    res.status(200).json({ message: "All notifications deleted" });
+  } catch (error) {
+    console.error("Error deleting all notifications:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};

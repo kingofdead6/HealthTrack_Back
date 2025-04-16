@@ -15,16 +15,13 @@ const setupSocket = (server, app) => {
   app.set("users", users);
 
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
 
     socket.on("register", (userId) => {
       users.set(userId, socket.id);
-      console.log(`User ${userId} registered with socket ${socket.id}`);
     });
 
     socket.on("join_chat", (chatId) => {
       socket.join(chatId);
-      console.log(`Socket ${socket.id} joined chat ${chatId}`);
     });
 
     socket.on("send_message", async ({ chatId, senderId, content, tempId }) => {
@@ -33,14 +30,12 @@ const setupSocket = (server, app) => {
           .populate("patient_id", "name")
           .populate("healthcare_id", "name");
         if (!chat) {
-          console.error("Chat not found for ID:", chatId);
           return;
         }
         if (
           chat.patient_id._id.toString() !== senderId &&
           chat.healthcare_id._id.toString() !== senderId
         ) {
-          console.error("Unauthorized sender:", senderId);
           return;
         }
 
@@ -63,7 +58,6 @@ const setupSocket = (server, app) => {
           chat_id: chatId,
           tempId,
         };
-        console.log("Emitting receive_message (socket):", messagePayload);
         io.to(chatId).emit("receive_message", messagePayload);
 
         const recipientId =
@@ -89,7 +83,6 @@ const setupSocket = (server, app) => {
           io.to(recipientSocket).emit("receive_notification", notification);
         }
       } catch (error) {
-        console.error("Error sending message via socket:", error);
       }
     });
 
@@ -101,7 +94,6 @@ const setupSocket = (server, app) => {
         );
         io.to(chatId).emit("messages_read", { chatId });
       } catch (error) {
-        console.error("Error marking messages read:", error);
       }
     });
 
@@ -111,10 +103,8 @@ const setupSocket = (server, app) => {
           { related_id: chatId, user_id: userId, read: false },
           { read: true }
         );
-        console.log(`Notifications marked as read for chat ${chatId}, user ${userId}`);
         io.to(chatId).emit("notifications_read", { chatId });
       } catch (error) {
-        console.error("Error marking notifications read:", error);
       }
     });
 

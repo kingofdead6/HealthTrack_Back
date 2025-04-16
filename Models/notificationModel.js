@@ -8,7 +8,7 @@ const notificationSchema = new mongoose.Schema({
     required: true,
   },
   message: { type: String, required: true },
-  related_id: { type: mongoose.Schema.Types.ObjectId, required: true }, // Appointment or Chat ID
+  related_id: { type: mongoose.Schema.Types.ObjectId, required: true }, 
   read: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 });

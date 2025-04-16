@@ -23,6 +23,9 @@ const messageSchema = new mongoose.Schema(
       type: String,
       enum: ["image", "pdf"],
     },
+    public_id: {
+      type: String,
+    },
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
