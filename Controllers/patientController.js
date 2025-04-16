@@ -14,7 +14,7 @@ import Appointment from "../Models/appointmentModel.js";
 import fs from "fs/promises"; 
 import path from "path";
 import nodemailer from "nodemailer";
-
+import cloudinary from "../cloudinary.js";
 
 const sendEmail = async (toEmail, subject, html) => {
   const transporter = nodemailer.createTransport({
@@ -92,6 +92,8 @@ export const confirmAccountDeletion = async (req, res) => {
 
 export const updatePatientProfile = async (req, res) => {
   const { gender, height, weight, blood_type, medical_state, phone_number } = req.body;
+  const profileImageFile = req.file;
+
   try {
     const patient = await Patient.findOne({ user_id: req.user._id });
     if (!patient) {
@@ -110,17 +112,56 @@ export const updatePatientProfile = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (req.file) {
-      if (user.profile_image) {
-        const oldImagePath = path.join(path.resolve(), user.profile_image);
-        try {
-          await fs.unlink(oldImagePath);
-          console.log(`Deleted old profile image: ${oldImagePath}`);
-        } catch (err) {
-          console.error(`Error deleting old profile image: ${err.message}`);
+    let profileImageUrl = user.profile_image;
+
+    if (profileImageFile) {
+      try {
+        console.log("Uploading file to Cloudinary:", {
+          originalname: profileImageFile.originalname,
+          mimetype: profileImageFile.mimetype,
+          size: profileImageFile.size,
+        });
+        if (user.profile_image) {
+          const publicId = user.profile_image.split("/").pop().split(".")[0];
+          await cloudinary.uploader.destroy(`profiles/patients/${publicId}`).catch((err) => {
+            console.error("Error deleting old image:", err);
+          });
         }
+
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: "profiles/patients",
+              public_id: `${req.user._id}_${Date.now()}`,
+              resource_type: "image",
+              allowed_formats: ["jpg", "png", "gif"],
+            },
+            (error, result) => {
+              if (error) {
+                return reject(error);
+              }
+              resolve(result);
+            }
+          );
+          stream.end(profileImageFile.buffer);
+        });
+
+        profileImageUrl = uploadResult.secure_url;
+        console.log("File uploaded to Cloudinary:", {
+          public_id: uploadResult.public_id,
+          secure_url: uploadResult.secure_url,
+        });
+        user.profile_image = profileImageUrl;
+      } catch (uploadError) {
+        console.error("Cloudinary upload error:", {
+          message: uploadError.message,
+          http_code: uploadError.http_code,
+        });
+        return res.status(500).json({
+          message: "Failed to upload image",
+          error: uploadError.message,
+        });
       }
-      user.profile_image = `uploads/${req.file.filename}`;
     }
 
     if (phone_number) {
@@ -129,15 +170,20 @@ export const updatePatientProfile = async (req, res) => {
 
     await user.save();
 
-    const updatedUser = await userModel.findById(req.user._id).select("name email phone_number profile_image");
+    const updatedUser = await userModel.findById(req.user._id).select(
+      "name email phone_number profile_image isBanned"
+    );
     res.status(200).json({
       message: "Profile updated successfully",
       patient,
       user: updatedUser,
     });
   } catch (error) {
-    console.error("Error updating patient profile:", error.message);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error updating patient profile:", error);
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 

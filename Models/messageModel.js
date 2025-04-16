@@ -1,13 +1,44 @@
 import mongoose from "mongoose";
 
-const messageSchema = new mongoose.Schema({
-  chat_id: { type: mongoose.Schema.Types.ObjectId, ref: "Chat", required: true },
-  sender_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  content: { type: String },
-  file_url: { type: String },
-  file_type: { type: String, enum: ["image", "video", "file", null] },
-  createdAt: { type: Date, default: Date.now },
-  read: { type: Boolean, default: false },
-});
+const messageSchema = new mongoose.Schema(
+  {
+    chat_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Chat",
+      required: true,
+    },
+    sender_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    content: {
+      type: String,
+      trim: true,
+    },
+    file_url: {
+      type: String,
+    },
+    file_type: {
+      type: String,
+      enum: ["image", "pdf"],
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+    },
+    seenBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    read: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
+);
 
 export default mongoose.model("Message", messageSchema);

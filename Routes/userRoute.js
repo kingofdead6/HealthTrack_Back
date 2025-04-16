@@ -8,31 +8,23 @@ import {
   deleteUser,
   unbanUser,
   requestPasswordReset,
-  changePassword, 
+  changePassword,
 } from "../Controllers/userController.js";
 import authMiddleware from "../Middleware/authMiddleware.js";
 import multer from "multer";
 
 const router = express.Router();
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const uploading = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/register", uploading.fields([{ name: "profile_image", maxCount: 1 }, { name: "certificate", maxCount: 1 }]), registerUser);
+router.post("/register", upload.fields([{ name: "certificate", maxCount: 1 }]), registerUser);
 router.post("/login", loginUser);
 router.get("/me", authMiddleware, getCurrentUser);
 router.get("/all", authMiddleware, getAllUsers);
 router.patch("/ban/:userId", authMiddleware, banUser);
 router.delete("/delete/:userId", authMiddleware, deleteUser);
 router.patch("/unban/:userId", authMiddleware, unbanUser);
-router.post("/reset-password", requestPasswordReset); 
-router.post("/change-password", changePassword); 
+router.post("/reset-password", requestPasswordReset);
+router.post("/change-password", changePassword);
 
 export default router;

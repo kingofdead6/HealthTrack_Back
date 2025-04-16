@@ -1,3 +1,4 @@
+// server/Routes/healthCareRoute.js
 import express from "express";
 import {
   getAllApprovedHealthCare,
@@ -5,24 +6,28 @@ import {
   getHealthCareDetails,
   getHealthcareProfile,
   updateAppointmentStatus,
-  updateHealthcareProfile, 
+  updateHealthcareProfile,
   deleteHealthcareRequest,
   createAnnouncement,
   getAllAnnouncements,
-  deleteAnnouncement, 
+  deleteAnnouncement,
 } from "../Controllers/healthCareController.js";
 import authMiddleware from "../Middleware/authMiddleware.js";
 import multer from "multer";
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/"); 
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/png", "image/gif"];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPEG, PNG, and GIF images are allowed"), false);
+    }
   },
 });
-const upload = multer({ storage });
 
 const router = express.Router();
 
@@ -31,11 +36,11 @@ router.get("/approved-healthcare", authMiddleware, getAllApprovedHealthCare);
 router.get("/appointments", authMiddleware, getHealthcareAppointments);
 router.put("/appointments/:appointmentId", authMiddleware, updateAppointmentStatus);
 router.get("/profile/:healthcareId", authMiddleware, getHealthcareProfile);
-router.put("/profile",authMiddleware,upload.fields([{ name: "profile_image", maxCount: 1 }]),updateHealthcareProfile);
-router.post("/delete-request", authMiddleware, deleteHealthcareRequest);
-router.post("/announcements", authMiddleware, createAnnouncement); 
-router.get("/announcements", authMiddleware, getAllAnnouncements); 
-router.delete("/announcements/:announcementId", authMiddleware, deleteAnnouncement);
+router.put("/profile", authMiddleware, upload.single("profile_image"), updateHealthcareProfile); 
 
+router.post("/delete-request", authMiddleware, deleteHealthcareRequest);
+router.post("/announcements", authMiddleware, createAnnouncement);
+router.get("/announcements", authMiddleware, getAllAnnouncements);
+router.delete("/announcements/:announcementId", authMiddleware, deleteAnnouncement);
 
 export default router;

@@ -9,6 +9,8 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import validator from "validator";
 import nodemailer from "nodemailer";
+import cloudinary from "../cloudinary.js";
+import { PassThrough } from "stream";
 
 const createToken = (_id) => {
   return jwt.sign({ _id }, process.env.JWT_SECRET, { expiresIn: "3d" });
@@ -56,7 +58,6 @@ export const registerUser = async (req, res) => {
     clinic_name,
   } = req.body;
 
-  const profileImage = req.files?.profile_image?.[0];
   const certificate = req.files?.certificate?.[0];
 
   try {
@@ -78,12 +79,53 @@ export const registerUser = async (req, res) => {
     }
 
     if (userTypeString === "healthcare" && (!location_link || !healthcare_type || !working_hours || !certificate)) {
-      return res.status(400).json({ message: "All healthcare fields are required" });
+      return res.status(400).json({ message: "All healthcare fields, including certificate, are required" });
     }
 
     const existingUser = await userModel.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email already exists" });
+    }
+
+    let certificateUrl = null;
+
+    if (certificate) {
+      console.log("Uploading certificate:", {
+        originalname: certificate.originalname,
+        mimetype: certificate.mimetype,
+        size: certificate.size,
+      });
+
+      certificateUrl = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: "certificates",
+            public_id: `${Date.now()}-${certificate.originalname}`,
+            resource_type: "image",
+          },
+          (error, result) => {
+            if (error) {
+              console.error("Cloudinary upload error:", error);
+              return reject(new Error(`Cloudinary upload failed: ${error.message}`));
+            }
+            console.log("Cloudinary upload successful:", result.secure_url);
+            resolve(result.secure_url);
+          }
+        );
+
+        const bufferStream = new PassThrough();
+        bufferStream.end(certificate.buffer);
+        bufferStream.pipe(uploadStream);
+
+        bufferStream.on("error", (error) => {
+          console.error("Buffer stream error:", error);
+          reject(error);
+        });
+      });
+
+      if (!certificateUrl) {
+        throw new Error("Failed to obtain certificate URL from Cloudinary");
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -96,7 +138,6 @@ export const registerUser = async (req, res) => {
       phone_number,
       user_type: userTypeString,
       isApproved: userTypeString === "patient",
-      profile_image: profileImage ? profileImage.path : null,
     });
     await user.save();
 
@@ -104,13 +145,14 @@ export const registerUser = async (req, res) => {
       const patient = new Patient({ user_id: user._id });
       await patient.save();
     } else if (userTypeString === "healthcare") {
+      console.log("Saving HealthCare document with certificate:", certificateUrl);
       const healthCare = new HealthCare({
         user_id: user._id,
         location_link,
         healthcare_type,
         working_hours,
         can_deliver: can_deliver === "true" || can_deliver === true,
-        certificate: certificate ? certificate.path : null,
+        certificate: certificateUrl,
       });
       await healthCare.save();
 
@@ -144,7 +186,7 @@ export const registerUser = async (req, res) => {
     const token = createToken(user._id);
     res.status(201).json({
       token,
-      user: { _id: user._id, name, email, user_type: user.user_type, isApproved: user.isApproved, profile_image: user.profile_image },
+      user: { _id: user._id, name, email, user_type: user.user_type, isApproved: user.isApproved },
     });
   } catch (error) {
     console.error("Registration error:", error);
@@ -180,7 +222,6 @@ export const loginUser = async (req, res) => {
         email: user.email,
         user_type: user.user_type,
         isApproved: user.isApproved,
-        profile_image: user.profile_image,
       },
     });
   } catch (error) {
@@ -203,7 +244,6 @@ export const getCurrentUser = async (req, res) => {
         user_type: user.user_type,
         isApproved: user.isApproved,
         phone_number: user.phone_number,
-        profile_image: user.profile_image,
         isBanned: user.isBanned,
       },
     });
@@ -220,7 +260,7 @@ export const getAllUsers = async (req, res) => {
     }
 
     const users = await userModel.find().select(
-      "_id name email user_type profile_image isBanned createdAt"
+      "_id name email user_type isBanned createdAt"
     );
 
     const usersWithDetails = await Promise.all(
@@ -232,7 +272,6 @@ export const getAllUsers = async (req, res) => {
             name: user.name,
             email: user.email,
             user_type: user.user_type,
-            profile_image: user.profile_image,
             isBanned: user.isBanned,
             healthcare_type: healthcare ? healthcare.healthcare_type : "N/A",
             createdAt: user.createdAt,
@@ -243,7 +282,6 @@ export const getAllUsers = async (req, res) => {
           name: user.name,
           email: user.email,
           user_type: user.user_type,
-          profile_image: user.profile_image,
           isBanned: user.isBanned,
           healthcare_type: "N/A",
         };

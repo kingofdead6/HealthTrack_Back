@@ -2,26 +2,18 @@ import Chat from "../Models/chatModel.js";
 import Message from "../Models/messageModel.js";
 import Appointment from "../Models/appointmentModel.js";
 import userModel from "../Models/userModel.js";
+import Notification from "../Models/notificationModel.js";
 import multer from "multer";
-import path from "path";
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "Uploads/messages/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
+import cloudinary from "../cloudinary.js";
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png"];
+    const allowedTypes = ["image/jpeg", "image/png", "application/pdf"];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Only images (JPEG, PNG) are allowed"), false);
+      cb(new Error("Only JPEG, PNG, and PDF files are allowed"), false);
     }
   },
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
@@ -67,7 +59,6 @@ export const createChat = async (req, res) => {
   }
 };
 
-
 export const getUserChats = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -87,7 +78,7 @@ export const getUserChats = async (req, res) => {
       chats.map(async (chat) => {
         const lastMessage = await Message.findOne({ chat_id: chat._id })
           .sort({ createdAt: -1 })
-          .select("content createdAt")
+          .select("content file_url file_type createdAt")
           .lean();
 
         const unreadCount = await Message.countDocuments({
@@ -98,7 +89,11 @@ export const getUserChats = async (req, res) => {
 
         return {
           ...chat,
-          lastMessage: lastMessage ? lastMessage.content : "No messages yet",
+          lastMessage: lastMessage
+            ? lastMessage.file_url
+              ? `[${lastMessage.file_type === "pdf" ? "PDF" : "Image"}] ${lastMessage.content || ""}`
+              : lastMessage.content || "No messages yet"
+            : "No messages yet",
           lastMessageTime: lastMessage ? lastMessage.createdAt : null,
           unreadCount,
         };
@@ -128,6 +123,7 @@ export const getChatMessages = async (req, res) => {
 
     const messages = await Message.find({ chat_id: chatId })
       .populate("sender_id", "name profile_image")
+      .populate("replyTo", "content sender_id")
       .sort({ createdAt: 1 });
 
     await Message.updateMany(
@@ -146,15 +142,12 @@ export const sendMessage = [
   upload.single("file"),
   async (req, res) => {
     const { chatId } = req.params;
-    const { content, tempId } = req.body;
+    const { content, tempId, replyTo } = req.body;
     const senderId = req.user._id;
     const file = req.file;
 
-    console.log("sendMessage called with:", { chatId, content, tempId, senderId, file });
-
     try {
       if (!chatId) {
-        console.error("Missing chatId");
         return res.status(400).json({ message: "Chat ID is required" });
       }
 
@@ -162,7 +155,6 @@ export const sendMessage = [
         .populate("patient_id", "name")
         .populate("healthcare_id", "name");
       if (!chat) {
-        console.error("Chat not found for ID:", chatId);
         return res.status(404).json({ message: "Chat not found" });
       }
 
@@ -170,15 +162,38 @@ export const sendMessage = [
         chat.patient_id._id.toString() !== senderId.toString() &&
         chat.healthcare_id._id.toString() !== senderId.toString()
       ) {
-        console.error("Unauthorized access attempt by:", senderId);
         return res.status(403).json({ message: "Unauthorized" });
       }
 
       let fileUrl = null;
       let fileType = null;
       if (file) {
-        fileUrl = `/Uploads/messages/${file.filename}`;
-        fileType = "image";
+        const resourceType = file.mimetype === "application/pdf" ? "raw" : "image";
+        const allowedFormats = resourceType === "image" ? ["jpg", "png"] : ["pdf"];
+        const publicId = `${senderId}_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9]/g, "_")}${
+          resourceType === "raw" ? ".pdf" : ""
+        }`;
+
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: `messages/${chatId}`,
+              public_id: publicId,
+              resource_type: resourceType,
+              allowed_formats: allowedFormats,
+            },
+            (error, result) => {
+              if (error) {
+                return reject(error);
+              }
+              resolve(result);
+            }
+          );
+          stream.end(file.buffer);
+        });
+
+        fileUrl = uploadResult.secure_url;
+        fileType = resourceType === "image" ? "image" : "pdf";
       }
 
       const message = new Message({
@@ -187,13 +202,14 @@ export const sendMessage = [
         content: content || null,
         file_url: fileUrl,
         file_type: fileType,
+        replyTo: replyTo || null,
+        seenBy: [senderId],
       });
       await message.save();
 
-      const populatedMessage = await Message.findById(message._id).populate(
-        "sender_id",
-        "name profile_image"
-      );
+      const populatedMessage = await Message.findById(message._id)
+        .populate("sender_id", "name profile_image")
+        .populate("replyTo", "content sender_id");
 
       const io = req.app.get("io");
       const messagePayload = {
@@ -201,7 +217,6 @@ export const sendMessage = [
         chat_id: chatId,
         tempId,
       };
-      console.log("Emitting receive_message:", messagePayload);
       io.to(chatId).emit("receive_message", messagePayload);
 
       const recipientId =
@@ -238,3 +253,76 @@ export const sendMessage = [
     }
   },
 ];
+
+export const deleteMessage = async (req, res) => {
+  const { chatId, messageId } = req.params;
+  const userId = req.user._id;
+
+  try {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: "Chat not found" });
+    }
+
+    if (
+      chat.patient_id.toString() !== userId.toString() &&
+      chat.healthcare_id.toString() !== userId.toString()
+    ) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (message.sender_id.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "You can only delete your own messages" });
+    }
+
+    await Message.deleteOne({ _id: messageId });
+
+    const io = req.app.get("io");
+    io.to(chatId).emit("message_deleted", { messageId });
+
+    res.status(200).json({ message: "Message deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting message:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+export const markMessageSeen = async (req, res) => {
+  const { chatId } = req.params;
+  const { messageIds } = req.body;
+  const userId = req.user._id;
+
+  try {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({ message: "Chat not found" });
+    }
+
+    if (
+      chat.patient_id.toString() !== userId.toString() &&
+      chat.healthcare_id.toString() !== userId.toString()
+    ) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    await Message.updateMany(
+      { _id: { $in: messageIds }, chat_id: chatId },
+      { $addToSet: { seenBy: userId } }
+    );
+
+    const io = req.app.get("io");
+    messageIds.forEach((messageId) => {
+      io.to(chatId).emit("message_seen", { messageId, userId });
+    });
+
+    res.status(200).json({ message: "Messages marked as seen" });
+  } catch (error) {
+    console.error("Error marking messages as seen:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};

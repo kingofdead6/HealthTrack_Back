@@ -10,8 +10,7 @@ import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import Chat from "../Models/chatModel.js";
 import Notification from "../Models/notificationModel.js";
-
-
+import cloudinary from "../cloudinary.js"; 
 
 const sendEmail = async (toEmail, subject, html) => {
   const transporter = nodemailer.createTransport({
@@ -37,6 +36,7 @@ const sendEmail = async (toEmail, subject, html) => {
     throw error;
   }
 };
+
 const checkApproval = async (req, res, next) => {
   try {
     const user = await userModel.findById(req.user._id);
@@ -52,6 +52,7 @@ const checkApproval = async (req, res, next) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 export const getPendingHealthCare = async (req, res) => {
   try {
     const pendingUsers = await userModel
@@ -338,7 +339,7 @@ export const updateAppointmentStatus = [
           const chat = new Chat({
             patient_id: appointment.patient_id._id,
             healthcare_id: appointment.user_id._id,
-            appointment_ids: [appointmentId], // Store appointment ID in an array
+            appointment_ids: [appointmentId],
           });
           await chat.save();
           chatId = chat._id;
@@ -494,87 +495,138 @@ export const getHealthcareProfile = async (req, res) => {
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
+export const updateHealthcareProfile = [
+  checkApproval,
+  async (req, res) => {
+    const userId = req.user._id;
+    const {
+      phone_number,
+      location_link,
+      working_hours,
+      can_deliver,
+      speciality,
+      ward,
+      pharmacy_name,
+      lab_name,
+      equipment,
+      clinic_name,
+    } = req.body;
+    const profileImageFile = req.file; // Changed from req.files?.profile_image?.[0] to match PatientProfile
 
-export const updateHealthcareProfile = [checkApproval, async (req, res) => {
-  const userId = req.user._id;
-  const {
-    phone_number,
-    location_link,
-    working_hours,
-    can_deliver,
-    speciality,
-    ward,
-    pharmacy_name,
-    lab_name,
-    equipment,
-    clinic_name,
-  } = req.body;
-  const profile_image = req.files?.profile_image?.[0]?.path;
+    try {
+      // Fetch user and verify
+      const user = await userModel.findById(userId);
+      if (!user || user.user_type !== "healthcare") {
+        return res.status(404).json({ message: "User not found or not healthcare" });
+      }
 
-  try {
-    const user = await userModel.findById(userId);
-    if (!user || user.user_type !== "healthcare") {
-      return res.status(404).json({ message: "User not found or not healthcare" });
+      // Update user fields
+      if (phone_number) {
+        user.phone_number = phone_number;
+      }
+
+      let profileImageUrl = user.profile_image;
+
+      // Handle profile image upload
+      if (profileImageFile) {
+        try {
+          console.log("Uploading profile image to Cloudinary:", {
+            originalname: profileImageFile.originalname,
+            mimetype: profileImageFile.mimetype,
+            size: profileImageFile.size,
+          });
+
+          // Delete old image if exists
+          if (user.profile_image) {
+            const publicId = user.profile_image.split("/").pop().split(".")[0];
+            await cloudinary.uploader.destroy(`profiles/healthcare/${publicId}`).catch((err) => {
+              console.error("Error deleting old image:", err);
+            });
+          }
+
+          // Upload new image
+          const uploadResult = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "profiles/healthcare",
+                public_id: `${userId}_${Date.now()}`,
+                resource_type: "image",
+                allowed_formats: ["jpg", "png", "gif"],
+              },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            stream.end(profileImageFile.buffer);
+          });
+
+          profileImageUrl = uploadResult.secure_url;
+          console.log("File uploaded to Cloudinary:", {
+            public_id: uploadResult.public_id,
+            secure_url: uploadResult.secure_url,
+          });
+          user.profile_image = profileImageUrl;
+        } catch (uploadError) {
+          console.error("Cloudinary upload error:", {
+            message: uploadError.message,
+            http_code: uploadError.http_code,
+          });
+          return res.status(500).json({
+            message: "Failed to upload image",
+            error: uploadError.message,
+          });
+        }
+      }
+
+      await user.save();
+
+      // Fetch and update healthcare profile
+      const healthcare = await HealthCare.findOne({ user_id: userId });
+      if (!healthcare) {
+        return res.status(404).json({ message: "Healthcare profile not found" });
+      }
+
+      // Update healthcare fields
+      healthcare.profile_image = profileImageUrl; // Sync profile image
+      healthcare.location_link = location_link || healthcare.location_link;
+      healthcare.working_hours = working_hours || healthcare.working_hours;
+      healthcare.can_deliver = can_deliver === "true" || can_deliver === true;
+
+      // Update type-specific fields
+      healthcare.speciality = speciality || healthcare.speciality;
+      healthcare.ward = ward || healthcare.ward;
+      healthcare.pharmacy_name = pharmacy_name || healthcare.pharmacy_name;
+      healthcare.lab_name = lab_name || healthcare.lab_name;
+      healthcare.equipment = equipment || healthcare.equipment;
+      healthcare.clinic_name = clinic_name || healthcare.clinic_name;
+
+      await healthcare.save();
+
+      // Fetch updated user details
+      const updatedUser = await userModel
+        .findById(userId)
+        .select("name email phone_number profile_image isBanned")
+        .lean();
+
+      // Prepare response to match PatientProfile
+      res.status(200).json({
+        message: "Healthcare profile updated successfully",
+        healthcare: {
+          ...healthcare.toObject(),
+          profile_image: profileImageUrl,
+        },
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Error updating healthcare profile:", error);
+      res.status(500).json({
+        message: "Server error",
+        error: error.message,
+      });
     }
-
-    user.phone_number = phone_number || user.phone_number;
-    if (profile_image) user.profile_image = profile_image;
-    await user.save();
-
-    const healthcare = await HealthCare.findOne({ user_id: userId });
-    if (!healthcare) {
-      return res.status(404).json({ message: "Healthcare record not found" });
-    }
-
-    healthcare.location_link = location_link || healthcare.location_link;
-    healthcare.working_hours = working_hours || healthcare.working_hours;
-    healthcare.can_deliver = can_deliver === "true" || can_deliver === true;
-    await healthcare.save();
-
-    let typeSpecificModel;
-    switch (healthcare.healthcare_type) {
-      case "doctor":
-        typeSpecificModel = await Doctor.findOne({ healthcare_id: healthcare._id });
-        if (typeSpecificModel) {
-          typeSpecificModel.speciality = speciality || typeSpecificModel.speciality;
-          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
-          await typeSpecificModel.save();
-        }
-        break;
-      case "nurse":
-        typeSpecificModel = await Nurse.findOne({ healthcare_id: healthcare._id });
-        if (typeSpecificModel) {
-          typeSpecificModel.ward = ward || typeSpecificModel.ward;
-          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
-          await typeSpecificModel.save();
-        }
-        break;
-      case "pharmacy":
-        typeSpecificModel = await Pharmacy.findOne({ healthcare_id: healthcare._id });
-        if (typeSpecificModel) {
-          typeSpecificModel.pharmacy_name = pharmacy_name || typeSpecificModel.pharmacy_name;
-          await typeSpecificModel.save();
-        }
-        break;
-      case "laboratory":
-        typeSpecificModel = await Laboratory.findOne({ healthcare_id: healthcare._id });
-        if (typeSpecificModel) {
-          typeSpecificModel.lab_name = lab_name || typeSpecificModel.lab_name;
-          typeSpecificModel.equipment = equipment || typeSpecificModel.equipment;
-          typeSpecificModel.clinic_name = clinic_name || typeSpecificModel.clinic_name;
-          await typeSpecificModel.save();
-        }
-        break;
-    }
-
-    const updatedProfile = await getHealthCareDetails(req, { ...res, status: () => ({ json: (data) => data }) }); // Mock res for reuse
-    res.status(200).json({ ...updatedProfile, user: { phone_number: user.phone_number, profile_image: user.profile_image } });
-  } catch (error) {
-    console.error("Update error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-}];
-
+  },
+];
 export const deleteHealthcareRequest = async (req, res) => {
   const token = req.headers.authorization.split(" ")[1];
   const { frontendUrl } = req.body;
@@ -602,9 +654,7 @@ export const deleteHealthcareRequest = async (req, res) => {
   }
 };
 
-export const createAnnouncement = [
-  checkApproval,
-  async (req, res) => {
+export const createAnnouncement = [checkApproval,async (req, res) => {
     const { title, content } = req.body;
 
     try {
@@ -631,20 +681,101 @@ export const createAnnouncement = [
   },
 ];
 
+
 export const getAllAnnouncements = async (req, res) => {
   try {
-    const announcements = await Announcement.find()
-      .populate("healthcare_id", "name profile_image") 
-      .sort({ createdAt: -1 }); 
+    const { visited } = req.query;
+    const user = req.user; 
+    let announcements;
 
-    console.log("Fetched all announcements:", announcements);
-    res.status(200).json(announcements);
+    if (visited === "true" && user && user.user_type === "patient") {
+      const acceptedAppointments = await Appointment.find({
+        patient_id: user._id,
+        status: { $in: ["active", "completed"] },
+      }).select("user_id");
+
+      const healthcareIds = [...new Set(acceptedAppointments.map((appt) => appt.user_id.toString()))];
+
+      if (healthcareIds.length === 0) {
+        return res.status(200).json([]);
+      }
+
+      const doctorHealthCare = await HealthCare.find({
+        user_id: { $in: healthcareIds },
+        healthcare_type: "doctor",
+      }).select("user_id");
+
+      const doctorIds = doctorHealthCare.map((hc) => hc.user_id.toString());
+
+      if (doctorIds.length === 0) {
+        return res.status(200).json([]);
+      }
+
+      announcements = await Announcement.find({
+        healthcare_id: { $in: doctorIds },
+      })
+        .populate({
+          path: "healthcare_id",
+          select: "name profile_image",
+          model: "User",
+        })
+        .sort({ createdAt: -1 });
+    } else {
+      announcements = await Announcement.find()
+        .populate({
+          path: "healthcare_id",
+          select: "name profile_image",
+          model: "User",
+        })
+        .sort({ createdAt: -1 });
+    }
+
+    const formattedAnnouncements = await Promise.all(
+      announcements.map(async (announcement) => {
+        let healthcareData = {};
+        if (announcement.healthcare_id) {
+          const healthcare = await HealthCare.findOne({ user_id: announcement.healthcare_id._id }).select(
+            "healthcare_type speciality location_link"
+          );
+          healthcareData = healthcare
+            ? {
+                healthcare_type: healthcare.healthcare_type || null,
+                speciality: healthcare.speciality || null,
+                location_link: healthcare.location_link || null,
+              }
+            : {};
+        }
+
+        return {
+          ...announcement._doc,
+          healthcare_id: {
+            _id: announcement.healthcare_id?._id || null,
+            name: announcement.healthcare_id?.name || "Unknown Provider",
+            profile_image: announcement.healthcare_id?.profile_image || null,
+            ...healthcareData,
+          },
+        };
+      })
+    );
+
+    console.log(
+      "Fetched announcements:",
+      formattedAnnouncements.map((a) => ({
+        id: a._id,
+        healthcare_id: a.healthcare_id._id,
+        healthcare_name: a.healthcare_id.name,
+        profile_image: a.healthcare_id.profile_image,
+        healthcare_type: a.healthcare_id.healthcare_type,
+        speciality: a.healthcare_id.speciality,
+      }))
+    );
+
+    res.status(200).json(formattedAnnouncements);
   } catch (error) {
-    console.error("Error fetching announcements:", error.message);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching announcements:", error.message, error.stack);
+    res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
-
 export const deleteAnnouncement = async (req, res) => {
   const { announcementId } = req.params;
 

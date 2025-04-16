@@ -21,7 +21,6 @@ app.set("io", io);
 
 app.use(cors());
 app.use(express.json());
-app.use("/Uploads", express.static("Uploads"));
 
 app.use("/api/users", userRoute);
 app.use("/api/patients", patientRoute);
