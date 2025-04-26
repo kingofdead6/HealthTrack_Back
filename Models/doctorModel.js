@@ -6,8 +6,10 @@ const DoctorSchema = new mongoose.Schema({
     type: String,
     enum: ["General Practitioner", "Dentist", "Surgeon", "Radiologist", "Pediatrician"],
     required: true,
+    
   },
   clinic_name: { type: String }, 
+  price: { type: Number, min: 0, default: null },
 });
 
 export default mongoose.model("Doctor", DoctorSchema);

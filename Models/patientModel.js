@@ -7,6 +7,8 @@ const PatientSchema = new mongoose.Schema({
   weight: { type: Number }, // in kg
   blood_type: { type: String, enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
   medical_state: { type: String },
+  medical_register: [{url: { type: String },public_id: { type: String },name: { type: String }},
+  ],
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 }, { timestamps: true });
 

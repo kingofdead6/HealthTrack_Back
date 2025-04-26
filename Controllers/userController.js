@@ -212,6 +212,12 @@ export const loginUser = async (req, res) => {
 
     const token = createToken(user._id);
 
+    let healthcare_type = null;
+    if (user.user_type === "healthcare") {
+      const healthcare = await HealthCare.findOne({ user_id: user._id });
+      healthcare_type = healthcare ? healthcare.healthcare_type : null;
+    }
+
     res.status(200).json({
       token,
       user: {
@@ -220,6 +226,7 @@ export const loginUser = async (req, res) => {
         email: user.email,
         user_type: user.user_type,
         isApproved: user.isApproved,
+        healthcare_type,
       },
     });
   } catch (error) {
@@ -234,6 +241,13 @@ export const getCurrentUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
+    let healthcare_type = null;
+    if (user.user_type === "healthcare") {
+      const healthcare = await HealthCare.findOne({ user_id: user._id });
+      healthcare_type = healthcare ? healthcare.healthcare_type : null;
+    }
+
     res.status(200).json({
       user: {
         _id: user._id,
@@ -243,6 +257,7 @@ export const getCurrentUser = async (req, res) => {
         isApproved: user.isApproved,
         phone_number: user.phone_number,
         isBanned: user.isBanned,
+        healthcare_type,
       },
     });
   } catch (error) {
@@ -404,7 +419,7 @@ export const changePassword = async (req, res) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
-      return res.status(400).json({ message: "Invalid or expired token" });
+      return res.status(401).json({ message: "Invalid or expired token" });
     }
 
     const user = await userModel.findById(decoded._id);
@@ -413,7 +428,7 @@ export const changePassword = async (req, res) => {
     }
 
     if (user.resetToken !== token || user.resetTokenExpires < Date.now()) {
-      return res.status(400).json({ message: "Invalid or expired token" });
+      return res.status(401).json({ message: "Invalid or expired token" });
     }
 
     if (!validator.isStrongPassword(password, { minSymbols: 0 })) {

@@ -259,7 +259,7 @@ export const sendMessage = [
         io.to(recipientSocket).emit("receive_notification", notification);
       }
 
-      res.status(201).json({
+      res.status(200).json({
         message: "Message sent successfully",
         message: populatedMessage,
       });
@@ -302,6 +302,7 @@ export const editMessage = async (req, res) => {
     }
 
     message.content = content;
+    message.isEdited = true;
     message.updatedAt = new Date();
     await message.save();
 
@@ -345,10 +346,20 @@ export const deleteMessage = async (req, res) => {
       return res.status(403).json({ message: "You can only delete your own messages" });
     }
 
-    await Message.deleteOne({ _id: messageId });
+    message.content = "This message was deleted";
+    message.isDeleted = true;
+    message.file_url = null;
+    message.thumbnail_url = null;
+    message.file_type = null;
+    message.public_id = null;
+    await message.save();
+
+    const populatedDeletedMessage = await Message.findById(message._id)
+      .populate("sender_id", "name profile_image")
+      .populate("replyTo", "content sender_id");
 
     const io = req.app.get("io");
-    io.to(chatId).emit("message_deleted", { messageId });
+    io.to(chatId).emit("message_deleted", populatedDeletedMessage);
 
     res.status(200).json({ message: "Message deleted successfully" });
   } catch (error) {

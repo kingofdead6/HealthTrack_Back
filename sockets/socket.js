@@ -15,7 +15,6 @@ const setupSocket = (server, app) => {
   app.set("users", users);
 
   io.on("connection", (socket) => {
-
     socket.on("register", (userId) => {
       users.set(userId, socket.id);
     });
@@ -83,6 +82,36 @@ const setupSocket = (server, app) => {
           io.to(recipientSocket).emit("receive_notification", notification);
         }
       } catch (error) {
+        console.error("Error in send_message:", error);
+      }
+    });
+
+    socket.on("update_message", async ({ chatId, message }) => {
+      try {
+        io.to(chatId).emit("message_updated", message);
+      } catch (error) {
+        console.error("Error in update_message:", error);
+      }
+    });
+
+    socket.on("mark_messages_seen", async ({ chatId, userId }) => {
+      try {
+        const messages = await Message.find({
+          chat_id: chatId,
+          sender_id: { $ne: userId },
+          seenBy: { $nin: [userId] },
+        });
+
+        await Message.updateMany(
+          { _id: { $in: messages.map((m) => m._id) } },
+          { $addToSet: { seenBy: userId } }
+        );
+
+        messages.forEach((message) => {
+          io.to(chatId).emit("message_seen", { messageId: message._id, userId });
+        });
+      } catch (error) {
+        console.error("Error in mark_messages_seen:", error);
       }
     });
 
@@ -94,6 +123,7 @@ const setupSocket = (server, app) => {
         );
         io.to(chatId).emit("messages_read", { chatId });
       } catch (error) {
+        console.error("Error in mark_messages_read:", error);
       }
     });
 
@@ -105,6 +135,7 @@ const setupSocket = (server, app) => {
         );
         io.to(chatId).emit("notifications_read", { chatId });
       } catch (error) {
+        console.error("Error in mark_notifications_read:", error);
       }
     });
 

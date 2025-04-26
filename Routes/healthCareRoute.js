@@ -11,6 +11,10 @@ import {
   createAnnouncement,
   getAllAnnouncements,
   deleteAnnouncement,
+  addUnavailableSlot,
+  getUnavailableSlots,
+  deleteUnavailableSlot,
+  validateQRCodeAndGeneratePDF,
 } from "../Controllers/healthCareController.js";
 import authMiddleware from "../Middleware/authMiddleware.js";
 import multer from "multer";
@@ -36,11 +40,16 @@ router.get("/approved-healthcare", authMiddleware, getAllApprovedHealthCare);
 router.get("/appointments", authMiddleware, getHealthcareAppointments);
 router.put("/appointments/:appointmentId", authMiddleware, updateAppointmentStatus);
 router.get("/profile/:healthcareId", authMiddleware, getHealthcareProfile);
-router.put("/profile", authMiddleware, upload.single("profile_image"), updateHealthcareProfile); 
+router.put("/profile", authMiddleware, upload.single("profile_image"), updateHealthcareProfile);
+router.post("/qr-code/validate", authMiddleware , validateQRCodeAndGeneratePDF); 
 
 router.post("/delete-request", authMiddleware, deleteHealthcareRequest);
 router.post("/announcements", authMiddleware, createAnnouncement);
 router.get("/announcements", authMiddleware, getAllAnnouncements);
 router.delete("/announcements/:announcementId", authMiddleware, deleteAnnouncement);
 
+router.post("/unavailable-slots", authMiddleware, addUnavailableSlot);
+router.get("/unavailable-slots", authMiddleware, getUnavailableSlots);
+router.delete("/unavailable-slots/:slotId", authMiddleware, deleteUnavailableSlot);
 export default router;
+
