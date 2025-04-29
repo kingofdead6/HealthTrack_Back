@@ -32,6 +32,7 @@
     "node-fetch": "^3.3.2",
     "nodemailer": "^6.10.0",
     "qrcode": "^1.5.4",
+    "sanitize-filename": "^1.6.3",
     "server": "file:",
     "socket.io": "^4.8.1",
     "validator": "^13.12.0"

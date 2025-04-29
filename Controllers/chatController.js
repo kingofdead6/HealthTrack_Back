@@ -87,6 +87,9 @@ export const getUserChats = async (req, res) => {
           read: false,
         });
 
+        const patientName = chat.patient_id?.name || "User deleted";
+        const healthcareName = chat.healthcare_id?.name || "User deleted";
+
         return {
           ...chat,
           lastMessage: lastMessage
@@ -96,6 +99,14 @@ export const getUserChats = async (req, res) => {
             : "No messages yet",
           lastMessageTime: lastMessage ? lastMessage.createdAt : null,
           unreadCount,
+          patient_id: {
+            ...chat.patient_id,
+            name: patientName,
+          },
+          healthcare_id: {
+            ...chat.healthcare_id,
+            name: healthcareName,
+          },
         };
       })
     );
@@ -122,16 +133,37 @@ export const getChatMessages = async (req, res) => {
     }
 
     const messages = await Message.find({ chat_id: chatId })
-      .populate("sender_id", "name profile_image")
+      .populate({
+        path: "sender_id",
+        select: "name profile_image",
+      })
       .populate("replyTo", "content sender_id")
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const modifiedMessages = messages.map((message) => ({
+      ...message,
+      sender_id: {
+        ...message.sender_id,
+        name: message.sender_id?.name || "User deleted",
+      },
+      replyTo: message.replyTo
+        ? {
+            ...message.replyTo,
+            sender_id: {
+              ...message.replyTo.sender_id,
+              name: message.replyTo.sender_id?.name || "User deleted",
+            },
+          }
+        : null,
+    }));
 
     await Message.updateMany(
       { chat_id: chatId, sender_id: { $ne: req.user._id }, read: false },
       { read: true }
     );
 
-    res.status(200).json(messages);
+    res.status(200).json(modifiedMessages);
   } catch (error) {
     console.error("Error fetching messages:", error);
     res.status(500).json({ message: "Server error" });
@@ -143,7 +175,7 @@ export const sendMessage = [
   async (req, res) => {
     const { chatId } = req.params;
     const { content, tempId, replyTo } = req.body;
-    const senderId = req.user._id;
+    const senderId = req.user._id.toString();
     const file = req.file;
 
     try {
@@ -159,8 +191,8 @@ export const sendMessage = [
       }
 
       if (
-        chat.patient_id._id.toString() !== senderId.toString() &&
-        chat.healthcare_id._id.toString() !== senderId.toString()
+        chat.patient_id._id.toString() !== senderId &&
+        chat.healthcare_id._id.toString() !== senderId
       ) {
         return res.status(403).json({ message: "Unauthorized" });
       }
@@ -227,23 +259,45 @@ export const sendMessage = [
         .populate("sender_id", "name profile_image")
         .populate("replyTo", "content sender_id");
 
-      const io = req.app.get("io");
-      const messagePayload = {
+      const modifiedMessage = {
         ...populatedMessage.toObject(),
-        chat_id: chatId,
+        sender_id: {
+          _id: populatedMessage.sender_id?._id.toString() || senderId,
+          name: populatedMessage.sender_id?.name || "User deleted",
+          profile_image: populatedMessage.sender_id?.profile_image || null,
+        },
+        replyTo: populatedMessage.replyTo
+          ? {
+              ...populatedMessage.replyTo,
+              sender_id: {
+                _id: populatedMessage.replyTo.sender_id?._id.toString(),
+                name: populatedMessage.replyTo.sender_id?.name || "User deleted",
+              },
+            }
+          : null,
         tempId,
       };
-      io.to(chatId).emit("receive_message", messagePayload);
+
+      const io = req.app.get("io");
+      const messagePayload = {
+        ...modifiedMessage,
+        chat_id: chatId,
+      };
 
       const recipientId =
-        chat.patient_id._id.toString() === senderId.toString()
-          ? chat.healthcare_id._id
-          : chat.patient_id._id;
-      const senderName =
-        chat.patient_id._id.toString() === senderId.toString()
-          ? chat.patient_id.name
-          : chat.healthcare_id.name;
+        chat.patient_id._id.toString() === senderId
+          ? chat.healthcare_id._id.toString()
+          : chat.patient_id._id.toString();
+      const users = req.app.get("users");
+      const recipientSocket = users.get(recipientId);
+      if (recipientSocket) {
+        io.to(recipientSocket).emit("receive_message", messagePayload);
+      }
 
+      const senderName =
+        chat.patient_id._id.toString() === senderId
+          ? chat.patient_id.name || "User deleted"
+          : chat.healthcare_id.name || "User deleted";
       const notification = new Notification({
         user_id: recipientId,
         type: "new_message",
@@ -253,15 +307,13 @@ export const sendMessage = [
       });
       await notification.save();
 
-      const users = req.app.get("users");
-      const recipientSocket = users.get(recipientId.toString());
       if (recipientSocket) {
         io.to(recipientSocket).emit("receive_notification", notification);
       }
 
       res.status(200).json({
         message: "Message sent successfully",
-        message: populatedMessage,
+        message: modifiedMessage,
       });
     } catch (error) {
       console.error("Error sending message:", error);
@@ -273,17 +325,19 @@ export const sendMessage = [
 export const editMessage = async (req, res) => {
   const { chatId, messageId } = req.params;
   const { content } = req.body;
-  const userId = req.user._id;
+  const userId = req.user._id.toString(); 
 
   try {
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findById(chatId)
+      .populate("patient_id", "name")
+      .populate("healthcare_id", "name");
     if (!chat) {
       return res.status(404).json({ message: "Chat not found" });
     }
 
     if (
-      chat.patient_id.toString() !== userId.toString() &&
-      chat.healthcare_id.toString() !== userId.toString()
+      chat.patient_id._id.toString() !== userId &&
+      chat.healthcare_id._id.toString() !== userId
     ) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -293,7 +347,7 @@ export const editMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (message.sender_id.toString() !== userId.toString()) {
+    if (message.sender_id.toString() !== userId) {
       return res.status(403).json({ message: "You can only edit your own messages" });
     }
 
@@ -310,10 +364,36 @@ export const editMessage = async (req, res) => {
       .populate("sender_id", "name profile_image")
       .populate("replyTo", "content sender_id");
 
-    const io = req.app.get("io");
-    io.to(chatId).emit("message_updated", populatedMessage);
+    const modifiedMessage = {
+      ...populatedMessage.toObject(),
+      sender_id: {
+        _id: populatedMessage.sender_id?._id.toString() || userId,
+        name: populatedMessage.sender_id?.name || "User deleted",
+        profile_image: populatedMessage.sender_id?.profile_image || null,
+      },
+      replyTo: populatedMessage.replyTo
+        ? {
+            ...populatedMessage.replyTo,
+            sender_id: {
+              _id: populatedMessage.replyTo.sender_id?._id.toString(),
+              name: populatedMessage.replyTo.sender_id?.name || "User deleted",
+            },
+          }
+        : null,
+    };
 
-    res.status(200).json({ message: "Message updated successfully", message: populatedMessage });
+    const io = req.app.get("io");
+    const recipientId =
+      chat.patient_id._id.toString() === userId
+        ? chat.healthcare_id._id.toString()
+        : chat.patient_id._id.toString();
+    const users = req.app.get("users");
+    const recipientSocket = users.get(recipientId);
+    if (recipientSocket) {
+      io.to(recipientSocket).emit("message_updated", modifiedMessage);
+    }
+
+    res.status(200).json({ message: "Message updated successfully", message: modifiedMessage });
   } catch (error) {
     console.error("Error editing message:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -322,17 +402,19 @@ export const editMessage = async (req, res) => {
 
 export const deleteMessage = async (req, res) => {
   const { chatId, messageId } = req.params;
-  const userId = req.user._id;
+  const userId = req.user._id.toString(); 
 
   try {
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findById(chatId)
+      .populate("patient_id", "name")
+      .populate("healthcare_id", "name");
     if (!chat) {
       return res.status(404).json({ message: "Chat not found" });
     }
 
     if (
-      chat.patient_id.toString() !== userId.toString() &&
-      chat.healthcare_id.toString() !== userId.toString()
+      chat.patient_id._id.toString() !== userId &&
+      chat.healthcare_id._id.toString() !== userId
     ) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -342,7 +424,7 @@ export const deleteMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (message.sender_id.toString() !== userId.toString()) {
+    if (message.sender_id.toString() !== userId) {
       return res.status(403).json({ message: "You can only delete your own messages" });
     }
 
@@ -358,8 +440,35 @@ export const deleteMessage = async (req, res) => {
       .populate("sender_id", "name profile_image")
       .populate("replyTo", "content sender_id");
 
+    // Ensure sender_id._id is a string and handle deleted users
+    const modifiedDeletedMessage = {
+      ...populatedDeletedMessage.toObject(),
+      sender_id: {
+        _id: populatedDeletedMessage.sender_id?._id.toString() || userId,
+        name: populatedDeletedMessage.sender_id?.name || "User deleted",
+        profile_image: populatedDeletedMessage.sender_id?.profile_image || null,
+      },
+      replyTo: populatedDeletedMessage.replyTo
+        ? {
+            ...populatedDeletedMessage.replyTo,
+            sender_id: {
+              _id: populatedDeletedMessage.replyTo.sender_id?._id.toString(),
+              name: populatedDeletedMessage.replyTo.sender_id?.name || "User deleted",
+            },
+          }
+        : null,
+    };
+
     const io = req.app.get("io");
-    io.to(chatId).emit("message_deleted", populatedDeletedMessage);
+    const recipientId =
+      chat.patient_id._id.toString() === userId
+        ? chat.healthcare_id._id.toString()
+        : chat.patient_id._id.toString();
+    const users = req.app.get("users");
+    const recipientSocket = users.get(recipientId);
+    if (recipientSocket) {
+      io.to(recipientSocket).emit("message_deleted", modifiedDeletedMessage);
+    }
 
     res.status(200).json({ message: "Message deleted successfully" });
   } catch (error) {

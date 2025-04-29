@@ -7,8 +7,13 @@ const PatientSchema = new mongoose.Schema({
   weight: { type: Number }, // in kg
   blood_type: { type: String, enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] },
   medical_state: { type: String },
-  medical_register: [{url: { type: String },public_id: { type: String },name: { type: String }},
-  ],
+  medical_register: [{
+    name: { type: String },
+    data: { type: Buffer }, // Store PDF as binary data
+    contentType: { type: String, default: "application/pdf" },
+    size: { type: Number },
+    uploadedAt: { type: Date, default: Date.now }
+  }],
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 }, { timestamps: true });
 

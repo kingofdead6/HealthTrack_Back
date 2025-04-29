@@ -667,17 +667,32 @@ export const getAllApprovedHealthCare = async (req, res) => {
   try {
     const approvedUsers = await userModel
       .find({ user_type: "healthcare", isApproved: true })
-      .select("name email phone_number profile_image");
+      .select("name email phone_number profile_image")
+      .lean(); // Use lean for performance
 
     if (approvedUsers.length === 0) {
       console.log("No approved healthcare providers found in users collection");
-    } else {
-      console.log("Fetched approved healthcare providers:", approvedUsers);
+      return res.status(200).json([]);
     }
+
+    console.log(
+      "Fetched approved healthcare providers:",
+      approvedUsers.map((user) => ({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      }))
+    );
 
     const healthcareDetails = await Promise.all(
       approvedUsers.map(async (user) => {
-        const healthcare = await HealthCare.findOne({ user_id: user._id });
+        // Ensure user exists and has valid data
+        if (!user._id || !user.name) {
+          console.log("Skipping user with missing data:", user._id);
+          return null;
+        }
+
+        const healthcare = await HealthCare.findOne({ user_id: user._id }).lean();
         if (!healthcare) {
           console.log("No HealthCare record for user:", user._id);
           return null;
@@ -686,39 +701,68 @@ export const getAllApprovedHealthCare = async (req, res) => {
         let typeSpecificData = {};
         switch (healthcare.healthcare_type) {
           case "doctor":
-            typeSpecificData = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name price");
+            typeSpecificData = await Doctor.findOne({ healthcare_id: healthcare._id })
+              .select("speciality clinic_name price")
+              .lean();
             break;
           case "nurse":
-            typeSpecificData = await Nurse.findOne({ healthcare_id: healthcare._id }).select("ward clinic_name price");
+            typeSpecificData = await Nurse.findOne({ healthcare_id: healthcare._id })
+              .select("ward clinic_name price")
+              .lean();
             break;
           case "pharmacy":
-            typeSpecificData = await Pharmacy.findOne({ healthcare_id: healthcare._id }).select("pharmacy_name");
+            typeSpecificData = await Pharmacy.findOne({ healthcare_id: healthcare._id })
+              .select("pharmacy_name")
+              .lean();
             break;
           case "laboratory":
-            typeSpecificData = await Laboratory.findOne({ healthcare_id: healthcare._id }).select("lab_name equipment clinic_name");
+            typeSpecificData = await Laboratory.findOne({ healthcare_id: healthcare._id })
+              .select("lab_name equipment clinic_name")
+              .lean();
             break;
+          default:
+            console.log("Unknown healthcare_type for user:", user._id, healthcare.healthcare_type);
+            return null;
+        }
+
+        if (!typeSpecificData && healthcare.healthcare_type !== "pharmacy") {
+          console.log(`No ${healthcare.healthcare_type} data for healthcare_id:`, healthcare._id);
+          return null;
         }
 
         return {
           user_id: user._id,
           name: user.name,
           email: user.email,
-          phone_number: user.phone_number,
-          profile_image: user.profile_image || "",
+          phone_number: user.phone_number || null,
+          profile_image: user.profile_image || null,
           healthcare_type: healthcare.healthcare_type,
-          location_link: healthcare.location_link,
-          working_hours: healthcare.working_hours,
-          can_deliver: healthcare.can_deliver,
-          ...typeSpecificData?._doc,
+          location_link: healthcare.location_link || null,
+          working_hours: healthcare.working_hours || null,
+          can_deliver: healthcare.can_deliver || false,
+          ...typeSpecificData,
         };
       })
     );
 
     const filteredDetails = healthcareDetails.filter((detail) => detail !== null);
-    console.log("Returning healthcare details:", filteredDetails);
+
+    if (filteredDetails.length === 0) {
+      console.log("No valid healthcare details after filtering");
+    } else {
+      console.log(
+        "Returning healthcare details:",
+        filteredDetails.map((detail) => ({
+          user_id: detail.user_id,
+          name: detail.name,
+          healthcare_type: detail.healthcare_type,
+        }))
+      );
+    }
+
     res.status(200).json(filteredDetails);
   } catch (error) {
-    console.error("Error fetching approved healthcare providers:", error);
+    console.error("Error fetching approved healthcare providers:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -731,10 +775,20 @@ export const getHealthcareAppointments = async (req, res) => {
         select: "name profile_image",
         model: userModel,
       })
-      .sort({ date: -1 });
+      .sort({ date: -1 })
+      .lean(); 
 
-    console.log("Fetched appointments for healthcare:", req.user._id, appointments);
-    res.status(200).json(appointments);
+    const transformedAppointments = appointments.map((appointment) => ({
+      ...appointment,
+      patient_id: {
+        _id: appointment.patient_id?._id || null,
+        name: appointment.patient_id?.name || "User deleted",
+        profile_image: appointment.patient_id?.profile_image || null,
+      },
+    }));
+
+    console.log("Fetched appointments for healthcare:", req.user._id, transformedAppointments);
+    res.status(200).json(transformedAppointments);
   } catch (error) {
     console.error("Error fetching healthcare appointments:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
@@ -1078,7 +1132,8 @@ export const getAllAnnouncements = async (req, res) => {
           select: "name profile_image",
           model: "User",
         })
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
     } else {
       announcements = await Announcement.find()
         .populate({
@@ -1086,13 +1141,14 @@ export const getAllAnnouncements = async (req, res) => {
           select: "name profile_image",
           model: "User",
         })
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean(); 
     }
 
     const formattedAnnouncements = await Promise.all(
       announcements.map(async (announcement) => {
         let healthcareData = {};
-        if (announcement.healthcare_id) {
+        if (announcement.healthcare_id?._id) {
           const healthcare = await HealthCare.findOne({ user_id: announcement.healthcare_id._id }).select(
             "healthcare_type speciality location_link"
           );
@@ -1106,10 +1162,10 @@ export const getAllAnnouncements = async (req, res) => {
         }
 
         return {
-          ...announcement._doc,
+          ...announcement,
           healthcare_id: {
             _id: announcement.healthcare_id?._id || null,
-            name: announcement.healthcare_id?.name || "Unknown Provider",
+            name: announcement.healthcare_id?.name || "User deleted",
             profile_image: announcement.healthcare_id?.profile_image || null,
             ...healthcareData,
           },

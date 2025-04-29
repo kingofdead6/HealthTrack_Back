@@ -97,7 +97,10 @@ export const getAllToolsMedicaments = async (req, res) => {
       query.healthcare_type = healthcareType;
     }
     if (pharmacyName) {
-      const users = await User.find({ name: { $regex: pharmacyName, $options: "i" } });
+      const users = await User.find({ name: { $regex: pharmacyName, $options: "i" } }).lean();
+      if (users.length === 0) {
+        return res.status(200).json({ toolsMedicaments: [] });
+      }
       query.user_id = { $in: users.map((u) => u._id) };
     }
     if (category) {
@@ -105,24 +108,53 @@ export const getAllToolsMedicaments = async (req, res) => {
     }
 
     const toolsMedicaments = await ToolMedicament.find(query)
-      .populate("user_id", "name profile_image")
-      .sort({ createdAt: -1 });
+      .populate({
+        path: "user_id",
+        select: "name profile_image",
+        model: "User",
+      })
+      .sort({ createdAt: -1 })
+      .lean(); // Use lean for performance
+
+    // Filter out records where user_id is null or missing (deleted users)
+    const validToolsMedicaments = toolsMedicaments.filter(
+      (tool) => tool.user_id && tool.user_id._id && tool.user_id.name
+    );
+
+    if (validToolsMedicaments.length === 0) {
+      console.log("No valid tools/medicaments found after filtering");
+      return res.status(200).json({ toolsMedicaments: [] });
+    }
 
     const toolsWithHealthcare = await Promise.all(
-      toolsMedicaments.map(async (tool) => {
-        const healthcare = await HealthCare.findOne({ user_id: tool.user_id._id }).select(
-          "healthcare_type name email phone_number location_link working_hours can_deliver speciality pharmacy_name lab_name averageRating comments"
-        );
+      validToolsMedicaments.map(async (tool) => {
+        const healthcare = await HealthCare.findOne({ user_id: tool.user_id._id })
+          .select(
+            "healthcare_type name email phone_number location_link working_hours can_deliver speciality pharmacy_name lab_name averageRating comments"
+          )
+          .lean();
+
         return {
-          ...tool._doc,
-          healthcare: healthcare || null, 
+          ...tool,
+          healthcare: healthcare || null,
         };
       })
     );
 
+    console.log(
+      "Returning tools/medicaments:",
+      toolsWithHealthcare.map((tool) => ({
+        id: tool._id,
+        name: tool.name,
+        user_id: tool.user_id._id,
+        user_name: tool.user_id.name,
+        healthcare_type: tool.healthcare_type,
+      }))
+    );
+
     res.status(200).json({ toolsMedicaments: toolsWithHealthcare });
   } catch (error) {
-    console.error("Get all error:", error);
+    console.error("Get all error:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };

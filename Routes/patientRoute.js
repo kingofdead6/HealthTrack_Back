@@ -17,7 +17,7 @@ import {
   uploadMedicalRegister,
   downloadMedicalRegister,
   deleteMedicalRegister,
-  viewMedicalRegisterPDF, 
+  viewMedicalRegisterPDF,
 } from "../Controllers/patientController.js";
 import multer from "multer";
 

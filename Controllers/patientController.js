@@ -1,8 +1,6 @@
 import Patient from "../Models/patientModel.js";
-import cloudinary from "../cloudinary.js";
 import { PassThrough } from "stream";
 import { Readable } from "stream";
-import fetch from "node-fetch";
 import jwt from "jsonwebtoken";
 import { sendDeletionEmail } from "../utils/email.js";
 import bcrypt from "bcryptjs";
@@ -15,7 +13,7 @@ import Notification from "../Models/notificationModel.js";
 import userModel from "../Models/userModel.js";
 import Announcement from "../Models/announcementModel.js";
 import Appointment from "../Models/appointmentModel.js";
-  import UnavailableSlot from "../Models/unavailableSlotModel.js";
+import UnavailableSlot from "../Models/unavailableSlotModel.js";
 import nodemailer from "nodemailer";
 
 const sendEmail = async (toEmail, subject, html) => {
@@ -193,7 +191,6 @@ export const updatePatientProfile = async (req, res) => {
   }
 };
 
-// Upload Medical Register with Custom Name
 export const uploadMedicalRegister = async (req, res) => {
   const userId = req.user._id;
   const file = req.file;
@@ -213,46 +210,24 @@ export const uploadMedicalRegister = async (req, res) => {
       return res.status(400).json({ message: "Only PDF files are allowed" });
     }
 
-    const publicId = `${userId}_${Date.now()}`;
-    const fullPublicId = `medical_registers/${publicId}.pdf`;
+    // Create new medical register entry
+    const newRegister = {
+      name: customName || `medical-register-${patient.medical_register.length + 1}`,
+      data: file.buffer, // Store the file buffer directly
+      contentType: file.mimetype,
+      size: file.size
+    };
 
-    const uploadResult = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: "medical_registers",
-          public_id: publicId,
-          resource_type: "raw",
-          format: "pdf",
-        },
-        (error, result) => {
-          if (error) {
-            console.error("Cloudinary upload error:", error);
-            return reject(error);
-          }
-          console.log("Cloudinary upload result:", result);
-          resolve(result);
-        }
-      );
-      stream.end(file.buffer);
-    });
-
-    patient.medical_register = patient.medical_register || [];
-    patient.medical_register.push({
-      url: uploadResult.secure_url,
-      public_id: publicId,
-      name: customName || `medical-register-${patient.medical_register.length}`,
-    });
+    patient.medical_register.push(newRegister);
     await patient.save();
-
-    console.log("Medical register upload response:", {
-      message: "Medical register uploaded successfully",
-      medical_register: uploadResult.secure_url,
-      public_id: publicId,
-    });
 
     res.status(200).json({
       message: "Medical register uploaded successfully",
-      medical_register: uploadResult.secure_url,
+      register: {
+        name: newRegister.name,
+        size: newRegister.size,
+        uploadedAt: newRegister.uploadedAt
+      }
     });
   } catch (error) {
     console.error("Medical register upload error:", error);
@@ -260,13 +235,6 @@ export const uploadMedicalRegister = async (req, res) => {
   }
 };
 
-// Download Medical Register
-function toNodeReadableStream(webStream) {
-  if (webStream[Symbol.asyncIterator]) {
-    return Readable.from(webStream);
-  }
-  return webStream;
-}
 
 export const downloadMedicalRegister = async (req, res) => {
   const { index } = req.params;
@@ -288,50 +256,21 @@ export const downloadMedicalRegister = async (req, res) => {
     }
 
     const medicalRegister = patient.medical_register[idx];
-    if (!medicalRegister?.public_id) {
+    if (!medicalRegister?.data) {
       return res.status(404).json({ message: "Medical register entry is invalid" });
     }
 
-    const fullPublicId = `medical_registers/${medicalRegister.public_id}`;
-    console.log("Fetching PDF from Cloudinary with public_id:", fullPublicId);
+    // Set headers for file download
+    const fileName = medicalRegister.name?.endsWith(".pdf")
+      ? medicalRegister.name
+      : `${medicalRegister.name || `medical-register-${idx}`}.pdf`;
 
-    const pdfUrl = cloudinary.url(fullPublicId, {
-      resource_type: "raw",
-      sign_url: true,
-      flags: "attachment",
-    });
-
-    console.log("Generated Cloudinary URL:", pdfUrl);
-
-    const fileResponse = await fetch(pdfUrl);
-
-    if (!fileResponse.ok) {
-      throw new Error(`Failed to fetch file from Cloudinary: ${fileResponse.statusText}`);
-    }
-
-    const contentType = fileResponse.headers.get("content-type") || "";
-    if (!["application/pdf", "application/octet-stream"].some(type => contentType.includes(type))) {
-      console.warn("Unexpected content type:", contentType);
-    }
-
-    const fileName =
-      medicalRegister.name?.endsWith(".pdf")
-        ? medicalRegister.name
-        : `${medicalRegister.name || `medical-register-${idx}`}.pdf`;
-
-    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Type", medicalRegister.contentType);
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", medicalRegister.size);
 
-    const stream = new PassThrough();
-    const readableStream = toNodeReadableStream(fileResponse.body);
-    readableStream.pipe(stream).pipe(res);
-
-    stream.on("error", (streamError) => {
-      console.error("Stream error:", streamError);
-      if (!res.headersSent) {
-        res.status(500).json({ message: "Failed to stream file", error: streamError.message });
-      }
-    });
+    // Send the PDF buffer directly
+    res.send(medicalRegister.data);
   } catch (error) {
     console.error("Error in downloadMedicalRegister:", {
       message: error.message,
@@ -339,12 +278,9 @@ export const downloadMedicalRegister = async (req, res) => {
       index,
       userId,
     });
-    if (!res.headersSent) {
-      res.status(500).json({ message: "Failed to download file", error: error.message });
-    }
+    res.status(500).json({ message: "Failed to download file", error: error.message });
   }
 };
-
 
 export const viewMedicalRegisterPDF = async (req, res) => {
   const { index } = req.params;
@@ -366,50 +302,21 @@ export const viewMedicalRegisterPDF = async (req, res) => {
     }
 
     const medicalRegister = patient.medical_register[idx];
-    if (!medicalRegister?.public_id) {
+    if (!medicalRegister?.data) {
       return res.status(404).json({ message: "Medical register entry is invalid" });
     }
 
-    const fullPublicId = `medical_registers/${medicalRegister.public_id}`;
-    console.log("Fetching PDF from Cloudinary with public_id:", fullPublicId);
-
-    const pdfUrl = cloudinary.url(fullPublicId, {
-      resource_type: "raw",
-      sign_url: true,
-    });
-
-    console.log("Generated Cloudinary URL:", pdfUrl);
-
-    const fileResponse = await fetch(pdfUrl);
-
-    if (!fileResponse.ok) {
-      throw new Error(`Failed to fetch file from Cloudinary: ${fileResponse.statusText}`);
-    }
-
-    const contentType = fileResponse.headers.get("content-type") || "";
-    if (!contentType.includes("pdf") && !contentType.includes("octet-stream")) {
-      return res.status(415).json({ message: "Unsupported file type" });
-    }
-
-    const fileName =
-      medicalRegister.name?.endsWith(".pdf")
-        ? medicalRegister.name
-        : `${medicalRegister.name || `medical-register-${idx}`}.pdf`;
-
     // Set headers for viewing in browser
-    res.setHeader("Content-Type", "application/pdf");
+    const fileName = medicalRegister.name?.endsWith(".pdf")
+      ? medicalRegister.name
+      : `${medicalRegister.name || `medical-register-${idx}`}.pdf`;
+
+    res.setHeader("Content-Type", medicalRegister.contentType);
     res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+    res.setHeader("Content-Length", medicalRegister.size);
 
-    const stream = new PassThrough();
-    const readableStream = toNodeReadableStream(fileResponse.body);
-    readableStream.pipe(stream).pipe(res);
-
-    stream.on("error", (err) => {
-      console.error("Stream error:", err);
-      if (!res.headersSent) {
-        res.status(500).json({ message: "Stream failed", error: err.message });
-      }
-    });
+    // Send the PDF buffer directly
+    res.send(medicalRegister.data);
   } catch (error) {
     console.error("Error in viewMedicalRegisterPDF:", {
       message: error.message,
@@ -417,12 +324,9 @@ export const viewMedicalRegisterPDF = async (req, res) => {
       index,
       userId,
     });
-    if (!res.headersSent) {
-      res.status(500).json({ message: "Failed to stream file", error: error.message });
-    }
+    res.status(500).json({ message: "Failed to view file", error: error.message });
   }
 };
-
 
 // Delete Medical Register
 export const deleteMedicalRegister = async (req, res) => {
@@ -447,17 +351,6 @@ export const deleteMedicalRegister = async (req, res) => {
     if (idx >= patient.medical_register.length) {
       return res.status(404).json({ message: `Medical register at index ${idx} not found` });
     }
-
-    const medicalRegister = patient.medical_register[idx];
-    if (!medicalRegister || !medicalRegister.public_id) {
-      console.error("Invalid medical register entry at index", idx, medicalRegister);
-      return res.status(404).json({ message: "Medical register entry is invalid" });
-    }
-
-    const fullPublicId = `medical_registers/${medicalRegister.public_id}`;
-    await cloudinary.uploader.destroy(fullPublicId, {
-      resource_type: "raw",
-    });
 
     patient.medical_register.splice(idx, 1);
     await patient.save();
@@ -875,7 +768,6 @@ export const createAppointment = async (req, res) => {
   }
 };
 
-
 export const getHealthcareAvailability = async (req, res) => {
   const { healthcareId } = req.params;
   try {
@@ -916,7 +808,7 @@ export const getHealthcareAvailability = async (req, res) => {
         end: endDateTime.toISOString(),
         time: slot.startTime,
         duration: (endDateTime - startDateTime) / 60000,
-        isFullDay: slot.startTime === "00:00" && slot.endTime === "23:59", 
+        isFullDay: slot.startTime === "00:00" && slot.endTime === "23:59",
       };
     });
 
@@ -930,7 +822,7 @@ export const getHealthcareAvailability = async (req, res) => {
     res.status(200).json({
       slots: [...bookedSlots, ...unavailableSlotTimes],
       workingHours: { startHour, endHour },
-      fullDayUnavailableDates, 
+      fullDayUnavailableDates,
     });
   } catch (error) {
     console.error("Error in getHealthcareAvailability:", error.message, error.stack);
