@@ -100,9 +100,7 @@ export const sendDeletionEmail = async (toEmail, token, frontendUrl) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`Deletion email sent successfully to ${toEmail}`);
   } catch (error) {
-    console.error("Error sending deletion email:", error);
     throw error;
   }
 };

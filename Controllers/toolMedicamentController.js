@@ -59,7 +59,6 @@ export const createToolMedicament = async (req, res) => {
 
     res.status(201).json({ message: "Tool/Medicament created", toolMedicament });
   } catch (error) {
-    console.error("Create error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -75,7 +74,7 @@ export const getMyToolsMedicaments = async (req, res) => {
     const toolsMedicaments = await ToolMedicament.find({ user_id: user._id }).sort({ createdAt: -1 });
     res.status(200).json({ toolsMedicaments });
   } catch (error) {
-    console.error("Get error:", error);
+
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -122,7 +121,6 @@ export const getAllToolsMedicaments = async (req, res) => {
     );
 
     if (validToolsMedicaments.length === 0) {
-      console.log("No valid tools/medicaments found after filtering");
       return res.status(200).json({ toolsMedicaments: [] });
     }
 
@@ -141,20 +139,10 @@ export const getAllToolsMedicaments = async (req, res) => {
       })
     );
 
-    console.log(
-      "Returning tools/medicaments:",
-      toolsWithHealthcare.map((tool) => ({
-        id: tool._id,
-        name: tool.name,
-        user_id: tool.user_id._id,
-        user_name: tool.user_id.name,
-        healthcare_type: tool.healthcare_type,
-      }))
-    );
+
 
     res.status(200).json({ toolsMedicaments: toolsWithHealthcare });
   } catch (error) {
-    console.error("Get all error:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };

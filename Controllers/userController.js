@@ -88,12 +88,6 @@ export const registerUser = async (req, res) => {
     let certificateUrl = null;
 
     if (certificate) {
-      console.log("Uploading certificate:", {
-        originalname: certificate.originalname,
-        mimetype: certificate.mimetype,
-        size: certificate.size,
-      });
-
       certificateUrl = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
           {
@@ -103,10 +97,8 @@ export const registerUser = async (req, res) => {
           },
           (error, result) => {
             if (error) {
-              console.error("Cloudinary upload error:", error);
               return reject(new Error(`Cloudinary upload failed: ${error.message}`));
             }
-            console.log("Cloudinary upload successful:", result.secure_url);
             resolve(result.secure_url);
           }
         );
@@ -116,7 +108,6 @@ export const registerUser = async (req, res) => {
         bufferStream.pipe(uploadStream);
 
         bufferStream.on("error", (error) => {
-          console.error("Buffer stream error:", error);
           reject(error);
         });
       });
@@ -143,7 +134,6 @@ export const registerUser = async (req, res) => {
       const patient = new Patient({ user_id: user._id });
       await patient.save();
     } else if (userTypeString === "healthcare") {
-      console.log("Saving HealthCare document with certificate:", certificateUrl);
       const healthCare = new HealthCare({
         user_id: user._id,
         location_link,
@@ -177,8 +167,58 @@ export const registerUser = async (req, res) => {
       await sendEmail(
         process.env.ADMIN_EMAIL,
         "New Healthcare Provider Registration",
-        `<p>Please approve ${name} (${email}) as a healthcare provider. Visit the admin dashboard to review.</p>`
+        `
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+            <title>New Registration</title>
+            <style>
+              body {
+                font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+                background-color: #f4f6f8;
+                margin: 0;
+                padding: 40px 0;
+              }
+              .email-container {
+                max-width: 600px;
+                background-color: #ffffff;
+                margin: auto;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+                color: #333333;
+              }
+              h2 {
+                color: #2a7ae2;
+                margin-top: 0;
+              }
+              .footer {
+                margin-top: 40px;
+                font-size: 13px;
+                color: #777;
+                text-align: center;
+              }
+             
+            </style>
+          </head>
+          <body>
+            <div class="email-container">
+              <h2>New Provider Registration</h2>
+              <p>A new healthcare provider has registered on the HealthTrack platform.</p>
+              <p><strong>Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p>Please review and approve their registration from the admin dashboard.</p>
+              <div class="footer">
+                &copy; ${new Date().getFullYear()} HealthTrack Admin Panel
+              </div>
+            </div>
+          </body>
+          </html>
+        `
       );
+      
     }
 
     const token = createToken(user._id);
@@ -187,7 +227,6 @@ export const registerUser = async (req, res) => {
       user: { _id: user._id, name, email, user_type: user.user_type, isApproved: user.isApproved },
     });
   } catch (error) {
-    console.error("Registration error:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -230,7 +269,6 @@ export const loginUser = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
     res.status(500).json({ message: "Server error during login" });
   }
 };
@@ -261,7 +299,6 @@ export const getCurrentUser = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -303,7 +340,6 @@ export const getAllUsers = async (req, res) => {
 
     res.status(200).json({ users: usersWithDetails });
   } catch (error) {
-    console.error("Error fetching users:", error);
     res.status(500).json({ message: "Server error while fetching users" });
   }
 };

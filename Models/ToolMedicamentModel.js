@@ -13,7 +13,7 @@ const ToolMedicamentSchema = new mongoose.Schema({
   name: { type: String, required: true },
   price: { type: Number, required: true, min: 0 },
   description: { type: String, default: "" },
-  picture: { type: String, required: true }, // Cloudinary URL
+  picture: { type: String, required: true },
   category: { type: String, default: "" }, 
   ratings: [RatingSchema],
   createdAt: { type: Date, default: Date.now },

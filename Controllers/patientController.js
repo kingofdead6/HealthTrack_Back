@@ -54,12 +54,10 @@ export const requestAccountDeletion = async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    console.log("Attempting to send deletion email to:", user.email);
     await sendDeletionEmail(user.email, deletionToken, frontendUrl);
 
     res.status(200).json({ message: "Deletion request sent. Please check your email." });
   } catch (error) {
-    console.error("Error in requestAccountDeletion:", error.message, error.stack);
     res.status(500).json({ message: `Failed to send deletion email: ${error.message}` });
   }
 };
@@ -85,7 +83,6 @@ export const confirmAccountDeletion = async (req, res) => {
 
     res.status(200).json({ message: "Account deleted successfully" });
   } catch (error) {
-    console.error("Error in confirmAccountDeletion:", error);
     if (error.name === "TokenExpiredError") {
       return res.status(400).json({ message: "Deletion token has expired" });
     }
@@ -120,15 +117,10 @@ export const updatePatientProfile = async (req, res) => {
 
     if (profileImageFile) {
       try {
-        console.log("Uploading file to Cloudinary:", {
-          originalname: profileImageFile.originalname,
-          mimetype: profileImageFile.mimetype,
-          size: profileImageFile.size,
-        });
+     
         if (user.profile_image) {
           const publicId = user.profile_image.split("/").pop().split(".")[0];
           await cloudinary.uploader.destroy(`profiles/patients/${publicId}`).catch((err) => {
-            console.error("Error deleting old image:", err);
           });
         }
 
@@ -151,16 +143,10 @@ export const updatePatientProfile = async (req, res) => {
         });
 
         profileImageUrl = uploadResult.secure_url;
-        console.log("File uploaded to Cloudinary:", {
-          public_id: uploadResult.public_id,
-          secure_url: uploadResult.secure_url,
-        });
+       
         user.profile_image = profileImageUrl;
       } catch (uploadError) {
-        console.error("Cloudinary upload error:", {
-          message: uploadError.message,
-          http_code: uploadError.http_code,
-        });
+
         return res.status(500).json({
           message: "Failed to upload image",
           error: uploadError.message,
@@ -183,7 +169,6 @@ export const updatePatientProfile = async (req, res) => {
       user: updatedUser,
     });
   } catch (error) {
-    console.error("Error updating patient profile:", error);
     res.status(500).json({
       message: "Server error",
       error: error.message,
@@ -230,7 +215,6 @@ export const uploadMedicalRegister = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Medical register upload error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -272,12 +256,7 @@ export const downloadMedicalRegister = async (req, res) => {
     // Send the PDF buffer directly
     res.send(medicalRegister.data);
   } catch (error) {
-    console.error("Error in downloadMedicalRegister:", {
-      message: error.message,
-      stack: error.stack,
-      index,
-      userId,
-    });
+
     res.status(500).json({ message: "Failed to download file", error: error.message });
   }
 };
@@ -318,12 +297,7 @@ export const viewMedicalRegisterPDF = async (req, res) => {
     // Send the PDF buffer directly
     res.send(medicalRegister.data);
   } catch (error) {
-    console.error("Error in viewMedicalRegisterPDF:", {
-      message: error.message,
-      stack: error.stack,
-      index,
-      userId,
-    });
+
     res.status(500).json({ message: "Failed to view file", error: error.message });
   }
 };
@@ -357,12 +331,7 @@ export const deleteMedicalRegister = async (req, res) => {
 
     res.status(200).json({ message: "Medical register deleted successfully" });
   } catch (error) {
-    console.error("Error in deleteMedicalRegister:", {
-      message: error.message,
-      stack: error.stack,
-      index,
-      userId,
-    });
+
     res.status(500).json({ message: "Failed to delete medical register", error: error.message });
   }
 };
@@ -398,10 +367,8 @@ export const getAnnouncements = async (req, res) => {
       return res.status(404).json({ message: "No announcements found" });
     }
 
-    console.log("Fetched announcements:", announcements);
     res.status(200).json(announcements);
   } catch (error) {
-    console.error("Error fetching announcements:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -423,9 +390,7 @@ export const getPatientAppointments = async (req, res) => {
         if (appointment.user_id && appointment.user_id._id) {
           const healthcare = await HealthCare.findOne({ user_id: appointment.user_id._id });
           healthcareType = healthcare ? healthcare.healthcare_type : "Unknown";
-        } else {
-          console.warn("Appointment missing valid user_id:", appointment._id, appointment.user_id);
-        }
+        } 
 
         return {
           ...appointment._doc,
@@ -433,17 +398,8 @@ export const getPatientAppointments = async (req, res) => {
         };
       })
     );
-
-    console.log("Fetched appointments for patient:", req.user._id, enrichedAppointments.map(appt => ({
-      _id: appt._id,
-      healthcareName: appt.user_id?.name || "Not populated",
-      healthcareType: appt.healthcare_type,
-      status: appt.status,
-      date: appt.date,
-    })));
     res.status(200).json(enrichedAppointments);
   } catch (error) {
-    console.error("Error fetching appointments:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -471,7 +427,6 @@ export const addFavoriteHealthcare = async (req, res) => {
 
     res.status(200).json({ message: "Added to favorites successfully" });
   } catch (error) {
-    console.error("Error adding favorite:", error.message);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -493,7 +448,6 @@ export const removeFavoriteHealthcare = async (req, res) => {
 
     res.status(200).json({ message: "Removed from favorites successfully" });
   } catch (error) {
-    console.error("Error removing favorite:", error.message);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -592,7 +546,6 @@ export const rateAppointment = async (req, res) => {
 
     res.status(200).json({ message: "Rating submitted successfully", appointment });
   } catch (error) {
-    console.error("Error submitting rating:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -633,7 +586,6 @@ const parseWorkingHours = (workingHours) => {
     const endHour = parseInt(end.split(" ")[0]) + (end.includes("PM") && end !== "12 PM" ? 12 : 0);
     return { startHour, endHour };
   } catch (error) {
-    console.error("Error parsing working hours:", error.message);
     return { startHour: 9, endHour: 17 };
   }
 };
@@ -752,18 +704,61 @@ export const createAppointment = async (req, res) => {
       healthcare.email,
       "New Appointment Request",
       `
-        <p>Dear ${healthcare.name},</p>
-        <p>You have a new appointment request from <strong>${patient.name}</strong> on <strong>${new Date(
-          date
-        ).toLocaleDateString()} at ${time}</strong>.</p>
-        <p>Please review and accept or reject the appointment through the platform.</p>
-        <p>Best regards,<br>The MedTrack Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <title>New Appointment Request</title>
+          <style>
+            body {
+              font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+              background-color: #f4f6f8;
+              margin: 0;
+              padding: 40px 0;
+            }
+            .email-container {
+              max-width: 600px;
+              background-color: #ffffff;
+              margin: auto;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+              color: #333333;
+            }
+            h2 {
+              color: #2a7ae2;
+              margin-top: 0;
+            }
+            .footer {
+              margin-top: 40px;
+              font-size: 13px;
+              color: #777;
+              text-align: center;
+            }
+            
+          </style>
+        </head>
+        <body>
+          <div class="email-container">
+            <h2>New Appointment Request</h2>
+            <p>Dear <strong>${healthcare.name}</strong>,</p>
+            <p>You have a new appointment request from <strong>${patient.name}</strong> on <strong>${new Date(
+              date
+            ).toLocaleDateString()} at ${time}</strong>.</p>
+            <p>Please review and accept or reject the appointment through the platform.</p>
+            <div class="footer">
+              &copy; ${new Date().getFullYear()} HealthTrack | Connecting Healthcare Professionals with Patients.
+            </div>
+          </div>
+        </body>
+        </html>
       `
     );
+    
 
     res.status(201).json({ message: "Appointment request sent successfully", appointment });
   } catch (error) {
-    console.error("Error creating appointment:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -825,7 +820,6 @@ export const getHealthcareAvailability = async (req, res) => {
       fullDayUnavailableDates,
     });
   } catch (error) {
-    console.error("Error in getHealthcareAvailability:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };

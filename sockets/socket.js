@@ -6,7 +6,7 @@ import Chat from "../Models/chatModel.js";
 const setupSocket = (server, app) => {
   const io = new Server(server, {
     cors: {
-      origin: "http://localhost:5173",
+      origin: process.env.FRONTEND_URL,
       methods: ["GET", "POST"],
     },
   });
@@ -24,7 +24,6 @@ const setupSocket = (server, app) => {
     });
 
     socket.on("send_message", async ({ chatId, senderId, content, tempId }) => {
-      try {
         const chat = await Chat.findById(chatId)
           .populate("patient_id", "name")
           .populate("healthcare_id", "name");
@@ -81,21 +80,14 @@ const setupSocket = (server, app) => {
         if (recipientSocket) {
           io.to(recipientSocket).emit("receive_notification", notification);
         }
-      } catch (error) {
-        console.error("Error in send_message:", error);
-      }
-    });
+       });
 
     socket.on("update_message", async ({ chatId, message }) => {
-      try {
         io.to(chatId).emit("message_updated", message);
-      } catch (error) {
-        console.error("Error in update_message:", error);
-      }
+     
     });
 
     socket.on("mark_messages_seen", async ({ chatId, userId }) => {
-      try {
         const messages = await Message.find({
           chat_id: chatId,
           sender_id: { $ne: userId },
@@ -110,40 +102,31 @@ const setupSocket = (server, app) => {
         messages.forEach((message) => {
           io.to(chatId).emit("message_seen", { messageId: message._id, userId });
         });
-      } catch (error) {
-        console.error("Error in mark_messages_seen:", error);
-      }
+     
     });
 
     socket.on("mark_messages_read", async ({ chatId, userId }) => {
-      try {
         await Message.updateMany(
           { chat_id: chatId, sender_id: { $ne: userId }, read: false },
           { read: true }
         );
         io.to(chatId).emit("messages_read", { chatId });
-      } catch (error) {
-        console.error("Error in mark_messages_read:", error);
-      }
+    
     });
 
     socket.on("mark_notifications_read", async ({ chatId, userId }) => {
-      try {
         await Notification.updateMany(
           { related_id: chatId, user_id: userId, read: false },
           { read: true }
         );
         io.to(chatId).emit("notifications_read", { chatId });
-      } catch (error) {
-        console.error("Error in mark_notifications_read:", error);
-      }
+    
     });
 
     socket.on("disconnect", () => {
       for (let [userId, socketId] of users.entries()) {
         if (socketId === socket.id) {
           users.delete(userId);
-          console.log(`User ${userId} disconnected`);
           break;
         }
       }

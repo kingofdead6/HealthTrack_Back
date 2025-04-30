@@ -8,6 +8,7 @@ import {
   deleteMessage,
   markMessageSeen,
   downloadFile,
+  deleteChat,
 } from "../Controllers/chatController.js";
 import authMiddleware from "../Middleware/authMiddleware.js";
 
@@ -19,6 +20,7 @@ router.get("/:chatId/messages", authMiddleware, getChatMessages);
 router.post("/:chatId/message", authMiddleware, sendMessage);
 router.put("/:chatId/messages/:messageId", authMiddleware, editMessage);
 router.delete("/:chatId/messages/:messageId", authMiddleware, deleteMessage);
+router.delete("/:chatId", authMiddleware, deleteChat);
 router.post("/:chatId/messages/seen", authMiddleware, markMessageSeen);
 router.get("/messages/:messageId/download", authMiddleware, downloadFile);
 

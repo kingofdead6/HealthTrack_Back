@@ -16,7 +16,6 @@ export const getAllRates = async (req, res) => {
 
     res.status(200).json(appointments);
   } catch (error) {
-    console.error("Error fetching reviews:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -40,7 +39,6 @@ export const deleteReview = async (req, res) => {
 
     res.status(200).json({ message: "Review deleted successfully" });
   } catch (error) {
-    console.error("Error deleting review:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -65,7 +63,6 @@ export const banUser = async (req, res) => {
 
     res.status(200).json({ message: "User banned successfully" });
   } catch (error) {
-    console.error("Error banning user:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -90,7 +87,6 @@ export const unbanUser = async (req, res) => {
 
     res.status(200).json({ message: "User unbanned successfully" });
   } catch (error) {
-    console.error("Error unbanning user:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -107,13 +103,11 @@ export const deleteUser = async (req, res) => {
       return res.status(400).json({ message: "Only patients can be deleted" });
     }
 
-    // Delete related data (optional, adjust based on your requirements)
     await Appointment.deleteMany({ patient_id: patientId });
     await userModel.deleteOne({ _id: patientId });
 
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
-    console.error("Error deleting user:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };

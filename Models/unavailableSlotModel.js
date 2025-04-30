@@ -5,7 +5,7 @@ import mongoose from "mongoose";
      date: { type: Date, required: true }, // Specific date of unavailability
      startTime: { type: String, required: true }, // Format: "HH:MM"
      endTime: { type: String, required: true }, // Format: "HH:MM"
-     reason: { type: String }, // Optional reason for unavailability
+     reason: { type: String },
    });
 
    export default mongoose.model("UnavailableSlot", UnavailableSlotSchema);

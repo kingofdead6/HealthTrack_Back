@@ -5,6 +5,7 @@ const chatSchema = new mongoose.Schema({
   healthcare_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   appointment_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: "Appointment" }],
   createdAt: { type: Date, default: Date.now },
+  deletedBy: [{type: mongoose.Schema.Types.ObjectId, ref: "User"}],
 });
 
 export default mongoose.model("Chat", chatSchema);

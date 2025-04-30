@@ -34,9 +34,7 @@ const sendEmail = async (toEmail, subject, html, attachments = []) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`Email sent successfully to ${toEmail}`);
   } catch (error) {
-    console.error("Error sending email:", error);
     throw error;
   }
 };
@@ -52,7 +50,6 @@ const checkApproval = async (req, res, next) => {
     }
     next();
   } catch (error) {
-    console.error("Approval check error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -73,7 +70,6 @@ const parseWorkingHours = (workingHours) => {
     if (end.includes("AM") && end === "12 AM") endHour = 0;
     return { startHour, endHour };
   } catch (error) {
-    console.error("Error parsing working hours:", error.message);
     return { startHour: 9, endHour: 17 };
   }
 };
@@ -146,7 +142,6 @@ export const getHealthcareAvailability = async (req, res) => {
       fullDayUnavailableDates,
     });
   } catch (error) {
-    console.error("Error in getHealthcareAvailability:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -159,40 +154,32 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     const { data, token } = req.query;
     qrData = data;
     qrToken = token;
-    console.log("GET request received:", { qrData, qrToken });
   } else if (req.method === "POST") {
     const { qrData: bodyQrData } = req.body;
     qrData = bodyQrData;
-    console.log("POST request received:", { qrData });
   } else {
-    console.error("Unsupported method:", req.method);
     return res.status(405).json({ message: "Method not allowed" });
   }
 
   try {
     if (!qrData) {
-      console.error("Missing QR code data");
       return res.status(400).json({ message: "Missing QR code data" });
     }
 
     let qrContent;
     try {
       qrContent = JSON.parse(req.method === "GET" ? decodeURIComponent(qrData) : qrData);
-      console.log("Parsed QR code content:", qrContent);
     } catch (parseError) {
-      console.error("Invalid QR code data format:", parseError.message);
       return res.status(400).json({ message: "Invalid QR code data format" });
     }
 
     appointmentId = qrContent.appointmentId;
     if (!appointmentId) {
-      console.error("QR code missing appointment ID");
       return res.status(400).json({ message: "QR code missing appointment ID" });
     }
 
     if (req.method === "GET") {
       if (!qrToken) {
-        console.error("Missing QR code token");
         return res.status(400).json({ message: "Missing QR code token" });
       }
 
@@ -200,7 +187,6 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       try {
         decodedToken = jwt.verify(qrToken, process.env.JWT_SECRET);
       } catch (jwtError) {
-        console.error("JWT verification failed:", jwtError.message);
         return res.status(401).json({ message: "Invalid or expired token" });
       }
 
@@ -211,13 +197,11 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       });
 
       if (!tokenRecord) {
-        console.error("Token not found in database");
         return res.status(401).json({ message: "Invalid or expired token" });
       }
     } else if (req.method === "POST") {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        console.error("Missing or invalid Authorization header");
         return res.status(401).json({ message: "Unauthorized: Missing or invalid token" });
       }
 
@@ -226,13 +210,11 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       try {
         decoded = jwt.verify(token, process.env.JWT_SECRET);
       } catch (jwtError) {
-        console.error("Bearer token verification failed:", jwtError.message);
         return res.status(401).json({ message: "Unauthorized: Invalid token" });
       }
 
       const user = await userModel.findById(decoded._id);
       if (!user) {
-        console.error("User not found for Bearer token");
         return res.status(401).json({ message: "Unauthorized: User not found" });
       }
     }
@@ -242,7 +224,6 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       .populate("patient_id", "name email phone_number")
       .populate("user_id", "name");
     if (!appointment) {
-      console.error("Appointment not found:", appointmentId);
       return res.status(404).json({ message: "Appointment not found" });
     }
 
@@ -250,19 +231,14 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     const healthcare = await HealthCare.findOne({ user_id: appointment.user_id._id }).lean();
 
     if (!patient || !healthcare) {
-      console.error("Patient or healthcare provider not found");
       return res.status(404).json({ message: "Patient or healthcare provider not found" });
     }
 
-    console.log("Generating PDF for appointment:", appointmentId);
-
-    // Generate PDF
     const doc = new jsPDF();
     doc.setFontSize(12);
 
     let yOffset = 10;
     const lineHeight = 10;
-    const pageHeight = doc.internal.pageSize.height;
     const maxWidth = 180;
 
     doc.text("APPOINTMENT INFORMATION", 10, yOffset);
@@ -430,15 +406,77 @@ export const updateAppointmentStatus = [
 
         await sendEmail(
           patientEmail,
-          "Appointment Accepted - Your QR Code",
+          "Appointment Accepted",
           `
-            <p>Dear ${appointment.patient_id.name},</p>
-            <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
-              appointment.date
-            ).toLocaleDateString()} at ${appointment.time}</strong> has been accepted.</p>
-            <p>Please find your appointment QR code attached below. Present this at the time of your appointment.</p>
-            <p>You can now chat with your doctor through the platform.</p>
-            <p>Best regards,<br>The MedTrack Team</p>
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+              <title>Appointment Confirmation</title>
+              <style>
+                body {
+                  font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+                  background-color: #f4f6f8;
+                  margin: 0;
+                  padding: 40px 0;
+                }
+                .email-container {
+                  max-width: 600px;
+                  background-color: #ffffff;
+                  margin: auto;
+                  padding: 30px;
+                  border-radius: 10px;
+                  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+                  color: #333333;
+                }
+                h2 {
+                  color: #2a7ae2;
+                  margin-top: 0;
+                }
+                .qr-section {
+                  text-align: center;
+                  margin: 30px 0;
+                }
+                .qr-section img {
+                  width: 200px;
+                  height: auto;
+                  border: 1px solid #ddd;
+                  border-radius: 8px;
+                }
+                .footer {
+                  margin-top: 40px;
+                  font-size: 13px;
+                  color: #777;
+                  text-align: center;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="email-container">
+                <h2>Appointment Confirmed</h2>
+                <p>Dear <strong>${appointment.patient_id.name}</strong>,</p>
+                <p>We’re pleased to inform you that your appointment has been <strong>accepted</strong>.</p>
+                <p>
+                  <strong>Doctor:</strong> ${appointment.user_id.name}<br>
+                  <strong>Date:</strong> ${new Date(appointment.date).toLocaleDateString()}<br>
+                  <strong>Time:</strong> ${appointment.time}
+                </p>
+                <p>Please find your QR code below. Present it at the time of your appointment:</p>
+                
+                <div class="qr-section">
+                  <img src="cid:qrcode" alt="QR Code">
+                </div>
+        
+                <p>You can now chat with your doctor through the platform.</p>
+              
+        
+                <div class="footer">
+                  &copy; ${new Date().getFullYear()} HealthTrack | All rights reserved.
+                </div>
+              </div>
+            </body>
+            </html>
           `,
           [
             {
@@ -448,6 +486,7 @@ export const updateAppointmentStatus = [
             },
           ]
         );
+        
       }
 
       if (status === "rejected") {
@@ -471,19 +510,59 @@ export const updateAppointmentStatus = [
           patientEmail,
           "Appointment Rejected",
           `
-            <p>Dear ${appointment.patient_id.name},</p>
-            <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
-              appointment.date
-            ).toLocaleDateString()} at ${appointment.time}</strong> has been rejected.</p>
-            <p>Please schedule a new appointment if needed.</p>
-            <p>Best regards,<br>The MedTrack Team</p>
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+              <title>Appointment Rejected</title>
+              <style>
+                body {
+                  font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+                  background-color: #f4f6f8;
+                  margin: 0;
+                  padding: 40px 0;
+                }
+                .email-container {
+                  max-width: 600px;
+                  background-color: #ffffff;
+                  margin: auto;
+                  padding: 30px;
+                  border-radius: 10px;
+                  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+                  color: #333333;
+                }
+                h2 {
+                  color: #e02b2b;
+                  margin-top: 0;
+                }
+                .footer {
+                  margin-top: 40px;
+                  font-size: 13px;
+                  color: #777;
+                  text-align: center;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="email-container">
+                <h2>Appointment Rejected</h2>
+                <p>Dear <strong>${appointment.patient_id.name}</strong>,</p>
+                <p>We regret to inform you that your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(appointment.date).toLocaleDateString()} at ${appointment.time}</strong> has been <strong>rejected</strong>.</p>
+                <p>Please consider scheduling a new appointment at your convenience.</p>
+                <div class="footer">
+                  &copy; ${new Date().getFullYear()} HealthTrack | All rights reserved.
+                </div>
+              </div>
+            </body>
+            </html>
           `
         );
+        
       }
 
       res.status(200).json({ message: "Appointment status updated", appointment });
     } catch (error) {
-      console.error("Error updating appointment:", error.message, error.stack);
       res.status(500).json({ message: "Server error" });
     }
   },
@@ -538,7 +617,6 @@ export const getPendingHealthCare = async (req, res) => {
 
     res.status(200).json(pendingDetails.filter((detail) => detail !== null));
   } catch (error) {
-    console.error("Error fetching pending healthcare:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -562,16 +640,59 @@ export const approveHealthCare = async (req, res) => {
       user.email,
       "Your Application Has Been Approved",
       `
-        <p>Dear ${user.name},</p>
-        <p>Congratulations! Your application to join the MedTrack platform as a healthcare provider has been approved.</p>
-        <p>You can now log in and start managing your profile and appointments.</p>
-        <p>Best regards,<br>The MedTrack Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <title>Application Approved</title>
+          <style>
+            body {
+              font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+              background-color: #f4f6f8;
+              margin: 0;
+              padding: 40px 0;
+            }
+            .email-container {
+              max-width: 600px;
+              background-color: #ffffff;
+              margin: auto;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+              color: #333333;
+            }
+            h2 {
+              color: #2a7ae2;
+              margin-top: 0;
+            }
+            
+            .footer {
+              margin-top: 40px;
+              font-size: 13px;
+              color: #777;
+              text-align: center;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="email-container">
+            <h2>Welcome to HealthTrack!</h2>
+            <p>Dear <strong>${user.name}</strong>,</p>
+            <p>🎉 Congratulations! Your application to join the HealthTrack platform as a healthcare provider has been <strong>approved</strong>.</p>
+            <p>You can now log in to your account to complete your profile, set your availability, and begin managing appointments.</p>
+            <div class="footer">
+              &copy; ${new Date().getFullYear()} HealthTrack | Empowering Healthcare Providers.
+            </div>
+          </div>
+        </body>
+        </html>
       `
     );
+    
 
     res.status(200).json({ message: "Healthcare provider approved successfully" });
   } catch (error) {
-    console.error("Error approving healthcare:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -610,16 +731,59 @@ export const rejectHealthCare = async (req, res) => {
     await HealthCare.deleteOne({ user_id: userId });
     const subject = "Sorry, Your Application Has Been Rejected";
     const html = `
-      <p>Dear ${user.name},</p>
-      <p>We regret to inform you that your application to join the MedTrack platform as a healthcare provider has been rejected.</p>
-      <p>If you have any questions or need further clarification, please contact our support team.</p>
-      <p>Best regards,<br>The MedTrack Team</p>
-    `;
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Application Rejected</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+        background-color: #f4f6f8;
+        margin: 0;
+        padding: 40px 0;
+      }
+      .email-container {
+        max-width: 600px;
+        background-color: #ffffff;
+        margin: auto;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+        color: #333333;
+      }
+      h2 {
+        color: #e02b2b;
+        margin-top: 0;
+      }
+      .footer {
+        margin-top: 40px;
+        font-size: 13px;
+        color: #777;
+        text-align: center;
+      }
+   
+    </style>
+  </head>
+  <body>
+    <div class="email-container">
+      <h2>Application Rejected</h2>
+      <p>Dear <strong>${user.name}</strong>,</p>
+      <p>We regret to inform you that your application to join the <strong>Healthrack</strong> platform as a healthcare provider has been <strong>rejected</strong>.</p>
+    
+      <div class="footer">
+        &copy; ${new Date().getFullYear()} HealthTrack | Supporting Healthcare Excellence.
+      </div>
+    </div>
+  </body>
+  </html>
+`;
+
     await sendEmail(user.email, subject, html);
     await userModel.deleteOne({ _id: userId });
     res.status(200).json({ message: "Healthcare provider rejected and account deleted successfully" });
   } catch (error) {
-    console.error("Error rejecting healthcare provider:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -658,7 +822,6 @@ export const getHealthCareDetails = async (req, res) => {
 
     res.status(200).json(details);
   } catch (error) {
-    console.error("Error fetching healthcare details:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -668,33 +831,22 @@ export const getAllApprovedHealthCare = async (req, res) => {
     const approvedUsers = await userModel
       .find({ user_type: "healthcare", isApproved: true })
       .select("name email phone_number profile_image")
-      .lean(); // Use lean for performance
+      .lean(); 
 
     if (approvedUsers.length === 0) {
-      console.log("No approved healthcare providers found in users collection");
       return res.status(200).json([]);
     }
 
-    console.log(
-      "Fetched approved healthcare providers:",
-      approvedUsers.map((user) => ({
-        id: user._id,
-        name: user.name,
-        email: user.email,
-      }))
-    );
+   
 
     const healthcareDetails = await Promise.all(
       approvedUsers.map(async (user) => {
-        // Ensure user exists and has valid data
         if (!user._id || !user.name) {
-          console.log("Skipping user with missing data:", user._id);
           return null;
         }
 
         const healthcare = await HealthCare.findOne({ user_id: user._id }).lean();
         if (!healthcare) {
-          console.log("No HealthCare record for user:", user._id);
           return null;
         }
 
@@ -721,12 +873,10 @@ export const getAllApprovedHealthCare = async (req, res) => {
               .lean();
             break;
           default:
-            console.log("Unknown healthcare_type for user:", user._id, healthcare.healthcare_type);
             return null;
         }
 
         if (!typeSpecificData && healthcare.healthcare_type !== "pharmacy") {
-          console.log(`No ${healthcare.healthcare_type} data for healthcare_id:`, healthcare._id);
           return null;
         }
 
@@ -746,23 +896,8 @@ export const getAllApprovedHealthCare = async (req, res) => {
     );
 
     const filteredDetails = healthcareDetails.filter((detail) => detail !== null);
-
-    if (filteredDetails.length === 0) {
-      console.log("No valid healthcare details after filtering");
-    } else {
-      console.log(
-        "Returning healthcare details:",
-        filteredDetails.map((detail) => ({
-          user_id: detail.user_id,
-          name: detail.name,
-          healthcare_type: detail.healthcare_type,
-        }))
-      );
-    }
-
     res.status(200).json(filteredDetails);
   } catch (error) {
-    console.error("Error fetching approved healthcare providers:", error.message, error.stack);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -787,10 +922,8 @@ export const getHealthcareAppointments = async (req, res) => {
       },
     }));
 
-    console.log("Fetched appointments for healthcare:", req.user._id, transformedAppointments);
     res.status(200).json(transformedAppointments);
   } catch (error) {
-    console.error("Error fetching healthcare appointments:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -898,17 +1031,9 @@ export const updateHealthcareProfile = [
 
       if (profileImageFile) {
         try {
-          console.log("Uploading profile image to Cloudinary:", {
-            originalname: profileImageFile.originalname,
-            mimetype: profileImageFile.mimetype,
-            size: profileImageFile.size,
-          });
-
           if (user.profile_image) {
             const publicId = user.profile_image.split("/").pop().split(".")[0];
-            await cloudinary.uploader.destroy(`profiles/healthcare/${publicId}`).catch((err) => {
-              console.error("Error deleting old image:", err);
-            });
+            await cloudinary.uploader.destroy(`profiles/healthcare/${publicId}`).catch((err) => { throw err });
           }
 
           const uploadResult = await new Promise((resolve, reject) => {
@@ -928,16 +1053,9 @@ export const updateHealthcareProfile = [
           });
 
           profileImageUrl = uploadResult.secure_url;
-          console.log("File uploaded to Cloudinary:", {
-            public_id: uploadResult.public_id,
-            secure_url: uploadResult.secure_url,
-          });
+         
           user.profile_image = profileImageUrl;
         } catch (uploadError) {
-          console.error("Cloudinary upload error:", {
-            message: uploadError.message,
-            http_code: uploadError.http_code,
-          });
           return res.status(500).json({
             message: "Failed to upload image",
             error: uploadError.message,
@@ -1030,7 +1148,6 @@ export const updateHealthcareProfile = [
         user: updatedUser,
       });
     } catch (error) {
-      console.error("Error updating healthcare profile:", error);
       res.status(500).json({
         message: "Server error",
         error: error.message,
@@ -1061,7 +1178,6 @@ export const deleteHealthcareRequest = async (req, res) => {
 
     res.status(200).json({ message: "Deletion request sent" });
   } catch (error) {
-    console.error("Delete request error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -1173,21 +1289,9 @@ export const getAllAnnouncements = async (req, res) => {
       })
     );
 
-    console.log(
-      "Fetched announcements:",
-      formattedAnnouncements.map((a) => ({
-        id: a._id,
-        healthcare_id: a.healthcare_id._id,
-        healthcare_name: a.healthcare_id.name,
-        profile_image: a.healthcare_id.profile_image,
-        healthcare_type: a.healthcare_id.healthcare_type,
-        speciality: a.healthcare_id.speciality,
-      }))
-    );
 
     res.status(200).json(formattedAnnouncements);
   } catch (error) {
-    console.error("Error fetching announcements:", error.message, error.stack);
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
@@ -1206,10 +1310,8 @@ export const deleteAnnouncement = async (req, res) => {
     }
 
     await Announcement.deleteOne({ _id: announcementId });
-    console.log("Announcement deleted:", announcementId);
     res.status(200).json({ message: "Announcement deleted successfully" });
   } catch (error) {
-    console.error("Error deleting announcement:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -1235,7 +1337,6 @@ export const addUnavailableSlot = async (req, res) => {
     for (const slot of slots) {
       const { date, startTime, endTime, reason } = slot;
 
-      console.log("Processing slot:", { date, startTime, endTime, reason });
 
       if (!date || !startTime || !endTime) {
         return res.status(400).json({ message: "Each slot must include date, startTime, and endTime" });
@@ -1268,7 +1369,6 @@ export const addUnavailableSlot = async (req, res) => {
       }
 
       const isFullDay = startTime === "00:00" && endTime === "23:59";
-      console.log("Is full day slot:", isFullDay);
 
       if (isFullDay) {
         const slotDateStart = new Date(slotDate.setHours(0, 0, 0, 0));
@@ -1308,14 +1408,59 @@ export const addUnavailableSlot = async (req, res) => {
             patientEmail,
             "Appointment Rejected - Provider Unavailability",
             `
-              <p>Dear ${appointment.patient_id.name},</p>
-              <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
-                appointment.date
-              ).toLocaleDateString()} at ${appointment.time}</strong> has been rejected.</p>
-              <p>The provider has marked this day as unavailable${reason ? `: ${reason}` : ""}. Please schedule a new appointment if needed.</p>
-              <p>Best regards,<br>The MedTrack Team</p>
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                <meta charset="UTF-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+                <title>Appointment Rejected</title>
+                <style>
+                  body {
+                    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+                    background-color: #f4f6f8;
+                    margin: 0;
+                    padding: 40px 0;
+                  }
+                  .email-container {
+                    max-width: 600px;
+                    background-color: #ffffff;
+                    margin: auto;
+                    padding: 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+                    color: #333333;
+                  }
+                  h2 {
+                    color: #e02b2b;
+                    margin-top: 0;
+                  }
+                  .footer {
+                    margin-top: 40px;
+                    font-size: 13px;
+                    color: #777;
+                    text-align: center;
+                  }
+              
+                </style>
+              </head>
+              <body>
+                <div class="email-container">
+                  <h2>Appointment Rejected</h2>
+                  <p>Dear <strong>${appointment.patient_id.name}</strong>,</p>
+                  <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(
+                    appointment.date
+                  ).toLocaleDateString()} at ${appointment.time}</strong> has been <strong>rejected</strong>.</p>
+                  <p>The provider has marked this day as unavailable${reason ? `: <em>${reason}</em>` : ""}.</p>
+                  <p>Please schedule a new appointment if needed.</p>
+                  <div class="footer">
+                    &copy; ${new Date().getFullYear()} HealthTrack | Enhancing Patient-Doctor Connections.
+                  </div>
+                </div>
+              </body>
+              </html>
             `
           );
+          
         }
 
         await UnavailableSlot.deleteMany({
@@ -1377,7 +1522,6 @@ export const addUnavailableSlot = async (req, res) => {
 
     res.status(201).json({ message: "Unavailable slots added successfully", slot: savedSlots });
   } catch (error) {
-    console.error("Error adding unavailable slot:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -1387,7 +1531,6 @@ export const getUnavailableSlots = async (req, res) => {
     const slots = await UnavailableSlot.find({ healthcare_id: req.user._id }).sort({ date: 1, startTime: 1 });
     res.status(200).json(slots);
   } catch (error) {
-    console.error("Error fetching unavailable slots:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -1408,7 +1551,6 @@ export const deleteUnavailableSlot = async (req, res) => {
     await UnavailableSlot.deleteOne({ _id: slotId });
     res.status(200).json({ message: "Unavailable slot deleted successfully" });
   } catch (error) {
-    console.error("Error deleting unavailable slot:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
