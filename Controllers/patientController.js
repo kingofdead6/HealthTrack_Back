@@ -15,6 +15,7 @@ import Announcement from "../Models/announcementModel.js";
 import Appointment from "../Models/appointmentModel.js";
 import UnavailableSlot from "../Models/unavailableSlotModel.js";
 import nodemailer from "nodemailer";
+import cloudinary from "../cloudinary.js";
 
 const sendEmail = async (toEmail, subject, html) => {
   const transporter = nodemailer.createTransport({

@@ -15,7 +15,7 @@ const healthKeywordsEn = [
     'sleep', 'immune', 'skin', 'liver', 'kidney', 'bone', 'muscle', 'joint', 'arthritis',
     'cardiologist', 'best doctor', 'best rated doctor', 'top doctor', 'rating', 'appointment',
     'speciality', 'specialties', 'multiple specialities', 'specialists', 'headache', 'eye pain',
-    'nausea', 'nauseous'
+    'nausea', 'nauseous', 'stomach', 'abdomen', 'abdominal'
 ];
 
 // Health-related keywords in French
@@ -29,7 +29,7 @@ const healthKeywordsFr = [
     'rein', 'os', 'muscle', 'articulation', 'arthrite', 'cardiologue', 'meilleur médecin',
     'meilleur docteur', 'top médecin', 'note', 'évaluation', 'rendez-vous', 'spécialité',
     'spécialités', 'multiples spécialités', 'spécialistes', 'mal de tête', 'douleur oculaire',
-    'nausée', 'nausées'
+    'nausée', 'nausées', 'estomac', 'abdomen', 'abdominale'
 ];
 
 // Greeting keywords in English
@@ -115,10 +115,13 @@ async function fetchDoctors(prompt, language, userId) {
 - Average rating: ${doctor.averageRating.toFixed(1)}/5 (${doctor.count} reviews)`;
         } else if (promptLower.includes('cardiologist') || promptLower.includes('cardiologue') ||
                    promptLower.includes('headache') || promptLower.includes('mal de tête') ||
-                   promptLower.includes('nausea') || promptLower.includes('nausée')) {
-            const specialty = promptLower.includes('cardiologist') || promptLower.includes('cardiologue')
-                ? 'Cardiologist'
-                : 'Neurologist';
+                   promptLower.includes('nausea') || promptLower.includes('nausée') ||
+                   promptLower.includes('stomach') || promptLower.includes('estomac') ||
+                   promptLower.includes('abdomen') || promptLower.includes('abdominale')) {
+            const specialty = (promptLower.includes('cardiologist') || promptLower.includes('cardiologue')) ? 'Cardiologist' :
+                             (promptLower.includes('headache') || promptLower.includes('mal de tête') ||
+                              promptLower.includes('nausea') || promptLower.includes('nausée')) ? 'Neurologist' :
+                             'Gastroenterologist';
             console.log(`Fetching ${specialty}...`);
             const doctors = await Doctor.find({ specialities: specialty })
                 .populate({
@@ -130,7 +133,7 @@ async function fetchDoctors(prompt, language, userId) {
             if (doctors.length === 0) {
                 console.log(`No ${specialty} found`);
                 return language === 'fr'
-                    ? `Aucun ${specialty === 'Cardiologist' ? 'cardiologue' : 'neurologue'} trouvé.`
+                    ? `Aucun ${specialty === 'Cardiologist' ? 'cardiologue' : specialty === 'Neurologist' ? 'neurologue' : 'gastro-entérologue'} trouvé.`
                     : `No ${specialty.toLowerCase()} found.`;
             }
 
@@ -262,6 +265,20 @@ const defaultHealthAdvice = {
             'Évitez les odeurs fortes ou les aliments lourds.',
             'Consultez un médecin si les nausées persistent.'
         ]
+    },
+    stomach: {
+        en: [
+            'Rest and avoid heavy or spicy foods.',
+            'Sip clear fluids like water to stay hydrated.',
+            'Consider an over-the-counter antacid if needed.',
+            'Consult a gastroenterologist if pain persists.'
+        ],
+        fr: [
+            'Reposez-vous et évitez les aliments lourds ou épicés.',
+            'Buvez des liquides clairs comme de l’eau pour rester hydraté.',
+            'Envisagez un antiacide en vente libre si nécessaire.',
+            'Consultez un gastro-entérologue si la douleur persiste.'
+        ]
     }
 };
 
@@ -277,8 +294,8 @@ export const handleChatbotRequest = async (req, res) => {
         const promptLower = prompt.toLowerCase();
         const language = detectLanguage(prompt);
         const instruction = language === 'fr'
-            ? 'Répondez de manière concise, claire et organisée avec des puces ou des paragraphes courts. Fournissez uniquement la réponse sans répéter la question ou les informations de l’utilisateur : '
-            : 'Respond concisely, clearly, and in an organized manner with bullets or short paragraphs. Provide only the answer without repeating the question or user information: ';
+            ? 'Répondez de manière concise, claire et organisée avec des puces ou des paragraphes courts. Fournissez uniquement la réponse sans répéter la question ou les informations de l’utilisateur.'
+            : 'Respond concisely, clearly, and in an organized manner with bullets or short paragraphs. Provide only the answer without repeating the question or user information.';
 
         const healthKeywords = language === 'fr' ? healthKeywordsFr : healthKeywordsEn;
         const greetingKeywords = language === 'fr' ? greetingKeywordsFr : greetingKeywordsEn;
@@ -287,7 +304,9 @@ export const handleChatbotRequest = async (req, res) => {
         const isHealthRelated = healthKeywords.some(keyword => promptLower.includes(keyword));
         const doctorQuery = promptLower.includes('best doctor') || promptLower.includes('meilleur médecin') ||
                            promptLower.includes('best rated doctor') || promptLower.includes('top doctor') ||
-                           promptLower.includes('cardiologist') || promptLower.includes('cardiologue');
+                           promptLower.includes('cardiologist') || promptLower.includes('cardiologue') ||
+                           promptLower.includes('stomach') || promptLower.includes('estomac') ||
+                           promptLower.includes('abdomen') || promptLower.includes('abdominale');
 
         // Extract user ID from JWT token
         let userId = null;
@@ -304,20 +323,39 @@ export const handleChatbotRequest = async (req, res) => {
             }
         }
 
-        let healthContext = '';
         let finalResponse = '';
+
+        // Handle greeting queries
+        if (isGreeting) {
+            console.log('Processing greeting');
+            finalResponse = language === 'fr'
+                ? `Bonjour, ${userInfo.name} ! Comment puis-je vous aider avec votre santé ?`
+                : `Hello, ${userInfo.name}! How can I assist with your health?`;
+            return res.status(200).send({ bot: finalResponse });
+        }
+
+        // Handle non-health queries
+        if (!isHealthRelated && !doctorQuery) {
+            console.log('Processing non-health query');
+            finalResponse = language === 'fr'
+                ? `${userInfo.name}, je suis spécialisé en santé. Posez une question sur la santé !`
+                : `${userInfo.name}, I specialize in health. Ask a health question!`;
+            return res.status(200).send({ bot: finalResponse });
+        }
+
+        // Handle health-related or doctor queries
+        let healthContext = '';
         const recentHistory = chatHistory.slice(-3).map(msg => 
             `${msg.isAi ? 'Assistant' : userInfo.name}: ${msg.text}`
         ).join('\n');
 
-        // Handle doctor queries
         if (doctorQuery) {
             console.log('Processing doctor query');
             healthContext = await fetchDoctors(prompt, language, userId);
             finalResponse = language === 'fr'
                 ? `${userInfo.name}, voici le médecin recommandé :\n${healthContext}`
                 : `${userInfo.name}, here’s the recommended doctor:\n${healthContext}`;
-        } else if (isHealthRelated) {
+        } else {
             console.log('Processing health-related query');
             healthContext = await fetchRelevantHealthData(prompt, language);
 
@@ -327,58 +365,60 @@ export const handleChatbotRequest = async (req, res) => {
                 defaultAdvice = defaultHealthAdvice.headache[language === 'fr' ? 'fr' : 'en'].map(item => `- ${item}`).join('\n');
             }
             if (promptLower.includes('nausea') || promptLower.includes('nausée')) {
-                const nauseaAdvice = defaultHealthAdvice.nausea[language === 'fr' ? 'fr' : 'en'].map(item => `- ${item}`).join('\n');
-                defaultAdvice = defaultAdvice ? `${defaultAdvice}\n${nauseaAdvice}` : nauseaAdvice;
+                defaultAdvice = defaultHealthAdvice.nausea[language === 'fr' ? 'fr' : 'en'].map(item => `- ${item}`).join('\n');
+            }
+            if (promptLower.includes('stomach') || promptLower.includes('estomac') ||
+                promptLower.includes('abdomen') || promptLower.includes('abdominale')) {
+                defaultAdvice = defaultHealthAdvice.stomach[language === 'fr' ? 'fr' : 'en'].map(item => `- ${item}`).join('\n');
             }
 
             // Fetch specialist for health queries
             let specialistInfo = '';
             if (promptLower.includes('headache') || promptLower.includes('mal de tête') ||
-                promptLower.includes('nausea') || promptLower.includes('nausée')) {
+                promptLower.includes('nausea') || promptLower.includes('nausée') ||
+                promptLower.includes('stomach') || promptLower.includes('estomac') ||
+                promptLower.includes('abdomen') || promptLower.includes('abdominale')) {
                 specialistInfo = await fetchDoctors(prompt, language, userId);
             }
 
-            // Prepare API input without user info or question
+            // Prepare API input
             const contextInstruction = language === 'fr'
                 ? `Contexte :\n${healthContext}\n\nHistorique :\n${recentHistory}\n\nFournissez une réponse directe : ${prompt}`
                 : `Context:\n${healthContext}\n\nHistory:\n${recentHistory}\n\nProvide a direct answer: ${prompt}`;
 
-            const fullInput = `${instruction}${contextInstruction}`;
-            console.log('Sending to Hugging Face API:', fullInput);
+            const fullInput = `${instruction}\n${contextInstruction}`;
+            console.log('Sending to DeepSeek API:', fullInput);
 
-            // Call Hugging Face API
+            // Call DeepSeek API
             const response = await axios.post(
-                'https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1',
+                'https://api.deepseek.com/v1/chat/completions',
                 {
-                    inputs: fullInput,
-                    parameters: {
-                        max_length: 200,
-                        temperature: 0.7,
-                        top_p: 0.9,
-                        num_return_sequences: 1
-                    }
+                    model: 'deepseek-chat',
+                    messages: [
+                        { role: 'system', content: instruction },
+                        { role: 'user', content: contextInstruction }
+                    ],
+                    max_tokens: 200,
+                    temperature: 0.7,
+                    top_p: 0.9
                 },
                 {
                     headers: {
-                        'Authorization': `Bearer ${process.env.HF_API_TOKEN}`,
+                        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
                         'Content-Type': 'application/json'
                     }
                 }
             );
 
-            let botResponse = response.data[0]?.generated_text?.trim() || '';
+            let botResponse = response.data.choices[0]?.message.content.trim() || '';
             if (!botResponse || botResponse.length < 10) {
-                console.log('Hugging Face API returned empty or short response');
+                console.log('DeepSeek API returned empty or short response');
                 botResponse = defaultAdvice || (language === 'fr'
-                    ? '- Essayez de reformuler votre question pour plus de détails.'
-                    : '- Try rephrasing your question for more details.');
+                    ? '- Essayez de reformuler votre question.'
+                    : '- Try rephrasing your question.');
             }
 
-            if (botResponse.startsWith(fullInput)) {
-                botResponse = botResponse.substring(fullInput.length).trim();
-            }
-
-            // Remove any echo of the prompt
+            // Remove prompt echo
             if (botResponse.toLowerCase().includes(promptLower.substring(0, 20))) {
                 botResponse = botResponse.substring(prompt.length).trim();
             }
@@ -397,16 +437,6 @@ export const handleChatbotRequest = async (req, res) => {
             finalResponse = language === 'fr'
                 ? `${userInfo.name}, voici des conseils :\n${botResponse || defaultAdvice}\n${specialistInfo ? `\nRecommandation :\n${specialistInfo}` : ''}${healthDisclaimer}`
                 : `${userInfo.name}, here’s some advice:\n${botResponse || defaultAdvice}\n${specialistInfo ? `\nRecommendation:\n${specialistInfo}` : ''}${healthDisclaimer}`;
-        } else if (isGreeting) {
-            console.log('Processing greeting');
-            finalResponse = language === 'fr'
-                ? `Bonjour, ${userInfo.name} ! Comment puis-je vous aider avec votre santé aujourd'hui ?`
-                : `Hello, ${userInfo.name}! How can I assist you with your health today?`;
-        } else {
-            console.log('Processing non-health query');
-            finalResponse = language === 'fr'
-                ? `${userInfo.name}, je suis spécialisé en santé. Posez une question sur la santé ou les médecins !`
-                : `${userInfo.name}, I specialize in health. Ask a health or doctor-related question!`;
         }
 
         console.log('Final response:', finalResponse);
