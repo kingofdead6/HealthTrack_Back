@@ -44,5 +44,5 @@ server.listen(PORT, () => {
 });
 
 app.get("/", (req, res) => {
-  res.send("API is running perfectly and this is a fact that you cannot deny ...");
+  res.send("API is running perfectly and this is a fact that you cannot deny gg ...");
 });
