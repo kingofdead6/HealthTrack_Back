@@ -21,7 +21,7 @@ const io = setupSocket(server, app);
 
 app.set("io", io);
 
-app.use(cors({ origin: process.env.FRONTEND_URL })); 
+app.use(cors()); 
 app.use(express.json());
 
 app.use("/api/users", userRoute);
@@ -44,5 +44,5 @@ server.listen(PORT, () => {
 });
 
 app.get("/", (req, res) => {
-  res.send("API is running perfectly and this is a fact ...");
+  res.send("API is running perfectly and this is a fact that you cannot deny ...");
 });
