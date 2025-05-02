@@ -4,7 +4,7 @@ const DoctorSchema = new mongoose.Schema({
   healthcare_id: { type: mongoose.Schema.Types.ObjectId, ref: "HealthCare", required: true },
   speciality: {
     type: String,
-    enum: ["General Practitioner", "Dentist", "Surgeon", "Radiologist", "Pediatrician"],
+    enum: ["General Practitioner", "Dentist", "Surgeon", "Radiologist", "Pediatrician" ],
     required: true,
     
   },
