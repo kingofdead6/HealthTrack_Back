@@ -1053,7 +1053,6 @@ export const updateHealthcareProfile = [
           });
 
           profileImageUrl = uploadResult.secure_url;
-         
           user.profile_image = profileImageUrl;
         } catch (uploadError) {
           return res.status(500).json({
@@ -1091,7 +1090,7 @@ export const updateHealthcareProfile = [
             nurse.ward = ward || nurse.ward;
             nurse.clinic_name = clinic_name || nurse.clinic_name;
             nurse.price = price ? parseFloat(price) : nurse.price;
-            await nurse.save();
+            await nurse/save();
           }
           break;
         case "pharmacy":
@@ -1116,10 +1115,10 @@ export const updateHealthcareProfile = [
 
       const updatedUser = await userModel
         .findById(userId)
-        .select("name email phone_number profile_image isBanned")
+        .select("name email phone_number profile_image isBanned isApproved")
         .lean();
 
-      let updatedHealthcare = { ...healthcare.toObject() };
+      let updatedHealthcare = { ...healthcare.toObject(), isApproved: user.isApproved };
       switch (healthcare.healthcare_type) {
         case "doctor":
           const doctor = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name price");

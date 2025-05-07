@@ -5,6 +5,8 @@ import Nurse from "../Models/nurseModel.js";
 import Pharmacy from "../Models/pharmacyModel.js";
 import Laboratory from "../Models/laboratoryModel.js";
 import Patient from "../Models/patientModel.js";
+import Report from "../Models/reportModel.js";
+
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import validator from "validator";
@@ -482,5 +484,36 @@ export const changePassword = async (req, res) => {
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error) {
     res.status(500).json({ message: "Server error during password reset" });
+  }
+};
+
+export const reportUser = async (req, res) => {
+  const { reported_id, reason } = req.body;
+  const reporter_id = req.user._id;
+
+  try {
+    if (!reported_id || !reason) {
+      return res.status(400).json({ message: "Reported user ID and reason are required" });
+    }
+
+    const reportedUser = await userModel.findById(reported_id);
+    if (!reportedUser) {
+      return res.status(404).json({ message: "Reported user not found" });
+    }
+
+    if (reporter_id.toString() === reported_id.toString()) {
+      return res.status(400).json({ message: "You cannot report yourself" });
+    }
+
+    const report = new Report({
+      reporter_id,
+      reported_id,
+      reason,
+    });
+    await report.save();
+
+    res.status(201).json({ message: "Report submitted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error while submitting report" });
   }
 };

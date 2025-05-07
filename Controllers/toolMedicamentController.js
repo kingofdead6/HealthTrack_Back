@@ -23,6 +23,14 @@ export const createToolMedicament = async (req, res) => {
       return res.status(403).json({ message: "Only healthcare users can create posts" });
     }
 
+    const user = await User.findById(req.user._id);
+    if (!user.isApproved) {
+      return res.status(403).json({ message: "Your account must be approved to create posts" });
+    }
+    if (user.isBanned) {
+      return res.status(403).json({ message: "Banned accounts cannot create posts" });
+    }
+
     const healthcare = await HealthCare.findOne({ user_id: req.user._id });
     if (!healthcare || !["pharmacy", "laboratory"].includes(healthcare.healthcare_type)) {
       return res.status(403).json({ message: "Only pharmacies and laboratories can create posts" });
@@ -74,7 +82,6 @@ export const getMyToolsMedicaments = async (req, res) => {
     const toolsMedicaments = await ToolMedicament.find({ user_id: user._id }).sort({ createdAt: -1 });
     res.status(200).json({ toolsMedicaments });
   } catch (error) {
-
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -113,9 +120,8 @@ export const getAllToolsMedicaments = async (req, res) => {
         model: "User",
       })
       .sort({ createdAt: -1 })
-      .lean(); // Use lean for performance
+      .lean();
 
-    // Filter out records where user_id is null or missing (deleted users)
     const validToolsMedicaments = toolsMedicaments.filter(
       (tool) => tool.user_id && tool.user_id._id && tool.user_id.name
     );
@@ -138,8 +144,6 @@ export const getAllToolsMedicaments = async (req, res) => {
         };
       })
     );
-
-
 
     res.status(200).json({ toolsMedicaments: toolsWithHealthcare });
   } catch (error) {

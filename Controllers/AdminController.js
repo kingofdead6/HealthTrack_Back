@@ -1,5 +1,6 @@
 import Appointment from "../Models/appointmentModel.js";
 import userModel from "../Models/userModel.js";
+import Report from "../Models/reportModel.js";
 
 export const getAllRates = async (req, res) => {
   try {
@@ -51,9 +52,6 @@ export const banUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (user.user_type !== "patient") {
-      return res.status(400).json({ message: "Only patients can be banned" });
-    }
     if (user.isBanned) {
       return res.status(400).json({ message: "User is already banned" });
     }
@@ -75,9 +73,7 @@ export const unbanUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (user.user_type !== "patient") {
-      return res.status(400).json({ message: "Only patients can be unbanned" });
-    }
+ 
     if (!user.isBanned) {
       return res.status(400).json({ message: "User is not banned" });
     }
@@ -99,15 +95,47 @@ export const deleteUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (user.user_type !== "patient") {
-      return res.status(400).json({ message: "Only patients can be deleted" });
-    }
-
     await Appointment.deleteMany({ patient_id: patientId });
+    await Report.deleteMany({
+      $or: [{ reported_id: patientId }, { reporter_id: patientId }],
+    });
     await userModel.deleteOne({ _id: patientId });
 
-    res.status(200).json({ message: "User deleted successfully" });
+    res.status(200).json({ message: "User and associated reports deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAllReports = async (req, res) => {
+  try {
+    const reports = await Report.find({ status: "pending" })
+      .populate("reporter_id", "name email user_type profile_image")
+      .populate("reported_id", "name email user_type isBanned profile_image");
+
+    if (!reports || reports.length === 0) {
+      return res.status(404).json({ message: "No pending reports found" });
+    }
+
+    res.status(200).json(reports);
+  } catch (error) {
+    res.status(500).json({ message: "Server error while fetching reports" });
+  }
+};
+
+export const deleteReport = async (req, res) => {
+  const { reportId } = req.body;
+
+  try {
+    const report = await Report.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    await Report.deleteOne({ _id: reportId });
+
+    res.status(200).json({ message: "Report deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error while deleting report" });
   }
 };
