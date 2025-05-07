@@ -517,3 +517,46 @@ export const reportUser = async (req, res) => {
     res.status(500).json({ message: "Server error while submitting report" });
   }
 };
+export const addAdmin = async (req, res) => {
+  const { name, email, password, phone_number } = req.body;
+
+  try {
+    if (req.user.user_type !== "admin") {
+      return res.status(403).json({ message: "Access denied. Admins only." });
+    }
+
+    if (!name || !email || !password || !phone_number) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: "Invalid email" });
+    }
+
+    if (!validator.isStrongPassword(password, { minSymbols: 0 })) {
+      return res.status(400).json({ message: "Password must be strong" });
+    }
+
+    const existingUser = await userModel.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashed_password = await bcrypt.hash(password, salt);
+
+    const user = new userModel({
+      name,
+      email,
+      hashed_password,
+      phone_number,
+      user_type: "admin",
+      isApproved: true,
+    });
+    await user.save();
+
+    res.status(201).json({ message: "Admin created successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

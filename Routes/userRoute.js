@@ -10,6 +10,7 @@ import {
   requestPasswordReset,
   changePassword,
   reportUser,
+  addAdmin,
 } from "../Controllers/userController.js";
 import authMiddleware from "../Middleware/authMiddleware.js";
 import multer from "multer";
@@ -28,5 +29,6 @@ router.patch("/unban/:userId", authMiddleware, unbanUser);
 router.post("/reset-password", requestPasswordReset);
 router.post("/change-password", changePassword);
 router.post("/report", authMiddleware, reportUser);
+router.post("/add-admin", authMiddleware, addAdmin);
 
 export default router;
