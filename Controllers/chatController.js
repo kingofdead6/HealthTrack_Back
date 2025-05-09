@@ -3,7 +3,7 @@ import Message from "../Models/messageModel.js";
 import Appointment from "../Models/appointmentModel.js";
 import Notification from "../Models/notificationModel.js";
 import multer from "multer";
-import cloudinary from "../cloudinary.js";
+import cloudinary from "../utils/cloudinary.js";
 import { PassThrough } from "stream";
 
 // Configure multer for file uploads with restrictions

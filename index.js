@@ -13,17 +13,24 @@ import toolMedicamentRoutes from "./Routes/toolMedicamentRoutes.js";
 import setupSocket from "./sockets/socket.js";
 import { createServer } from "http";
 
+// Load environment variables
 dotenv.config();
 
+// Initialize Express app
 const app = express();
-const server = createServer(app);
-const io = setupSocket(server, app);
 
+// Create HTTP server for Express and Socket.IO
+const server = createServer(app);
+
+// Set up Socket.IO for real-time features
+const io = setupSocket(server, app);
 app.set("io", io);
 
-app.use(cors()); 
+// Enable CORS and JSON parsing
+app.use(cors());
 app.use(express.json());
 
+// Define API routes
 app.use("/api/users", userRoute);
 app.use("/api/patients", patientRoute);
 app.use("/api/healthcare", healthCareRoute);
@@ -33,16 +40,19 @@ app.use("/api/admin", adminRoute);
 app.use("/api/chatbot", chatbotRoute);
 app.use("/api/tools-medicaments", toolMedicamentRoutes);
 
+// Connect to MongoDB
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
+// Root endpoint for API status
 app.get("/", (req, res) => {
   res.send("API is running perfectly and this is a fact that you cannot deny gg and i m cool ...");
 });

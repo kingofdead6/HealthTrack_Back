@@ -12,7 +12,7 @@ import mongoose from "mongoose";
      comment: { type: String },
      qrCodeUrl: { type: String }, 
    });
-
+// Pre-save hook to auto-generate time from date if not provided
    AppointmentSchema.pre("save", function (next) {
      if (!this.time && this.date) {
        const hours = String(this.date.getUTCHours()).padStart(2, "0");

@@ -12,9 +12,10 @@ import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import Chat from "../Models/chatModel.js";
 import Notification from "../Models/notificationModel.js";
-import cloudinary from "../cloudinary.js";
+import cloudinary from "../utils/cloudinary.js";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf"
+// Function to send an email using nodemailer
 const sendEmail = async (toEmail, subject, html, attachments = []) => {
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -33,12 +34,13 @@ const sendEmail = async (toEmail, subject, html, attachments = []) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions); // Send the email
   } catch (error) {
-    throw error;
+    throw error; // Handle email sending error
   }
 };
 
+// Middleware to check if user is an approved healthcare provider
 const checkApproval = async (req, res, next) => {
   try {
     const user = await userModel.findById(req.user._id);
@@ -48,41 +50,45 @@ const checkApproval = async (req, res, next) => {
     if (!user.isApproved) {
       return res.status(403).json({ message: "Account not approved yet. Please wait for admin approval." });
     }
-    next();
+    next(); // Proceed if the user is approved
   } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error" }); // Handle server errors
   }
 };
 
-// Parse Working Hours
+// Function to parse and convert working hours string to time format
 const parseWorkingHours = (workingHours) => {
   const hoursString = workingHours && typeof workingHours === "string" && workingHours.includes(" - ")
     ? workingHours
-    : "9 AM - 5 PM";
+    : "9 AM - 5 PM"; // Default working hours if not provided
+
   try {
-    if (hoursString === "24/7") return { startHour: 0, endHour: 24 };
-    const [start, end] = hoursString.split(" - ");
+    if (hoursString === "24/7") return { startHour: 0, endHour: 24 }; // Special case for 24/7 hours
+    const [start, end] = hoursString.split(" - "); // Extract start and end time
     let startHour = parseInt(start.split(" ")[0]);
     let endHour = parseInt(end.split(" ")[0]);
+    
+    // Convert PM/AM times to 24-hour format
     if (start.includes("PM") && start !== "12 PM") startHour += 12;
     if (end.includes("PM") && end !== "12 PM") endHour += 12;
     if (start.includes("AM") && start === "12 AM") startHour = 0;
     if (end.includes("AM") && end === "12 AM") endHour = 0;
-    return { startHour, endHour };
+
+    return { startHour, endHour }; // Return parsed working hours
   } catch (error) {
-    return { startHour: 9, endHour: 17 };
+    return { startHour: 9, endHour: 17 }; // Default to 9 AM - 5 PM if error occurs
   }
 };
 
-// Get Healthcare Availability
+// Function to fetch healthcare provider's availability
 export const getHealthcareAvailability = async (req, res) => {
   const { healthcareId } = req.params;
   try {
     const now = new Date();
     const maxDate = new Date(now);
-    maxDate.setDate(now.getDate() + 7);
+    maxDate.setDate(now.getDate() + 30); // Set the max date to 30 days ahead
 
-    // Fetch booked appointments
+    // Fetch booked appointments within the next 30 days
     const appointments = await Appointment.find({
       user_id: healthcareId,
       date: { $gte: now, $lte: maxDate },
@@ -95,15 +101,10 @@ export const getHealthcareAvailability = async (req, res) => {
       start.setUTCHours(hours, minutes, 0, 0);
       const duration = appt.duration || 30;
       const end = new Date(start.getTime() + duration * 60000);
-      return {
-        start: start.toISOString(),
-        time: appt.time,
-        duration: duration,
-        end: end.toISOString(),
-      };
+      return { start: start.toISOString(), time: appt.time, duration, end: end.toISOString() };
     });
 
-    // Fetch unavailable slots
+    // Fetch unavailable slots for the healthcare provider
     const unavailableSlots = await UnavailableSlot.find({
       healthcare_id: healthcareId,
       date: { $gte: now, $lte: maxDate },
@@ -131,7 +132,7 @@ export const getHealthcareAvailability = async (req, res) => {
     const healthcare = await HealthCare.findOne({ user_id: healthcareId });
     const { startHour, endHour } = parseWorkingHours(healthcare?.working_hours);
 
-    // Identify fully unavailable days
+    // Identify days with full-day unavailability
     const fullDayUnavailableDates = unavailableSlotTimes
       .filter((slot) => slot.isFullDay)
       .map((slot) => new Date(slot.start).toISOString().split("T")[0]);
@@ -146,10 +147,12 @@ export const getHealthcareAvailability = async (req, res) => {
   }
 };
 
-// New Endpoint: Validate QR Code and Generate PDF
+
+// Validate QR Code and Generate PDF
 export const validateQRCodeAndGeneratePDF = async (req, res) => {
   let qrData, qrToken, appointmentId;
 
+  // Handle GET or POST method
   if (req.method === "GET") {
     const { data, token } = req.query;
     qrData = data;
@@ -162,6 +165,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
   }
 
   try {
+    // Validate QR code data
     if (!qrData) {
       return res.status(400).json({ message: "Missing QR code data" });
     }
@@ -173,11 +177,13 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       return res.status(400).json({ message: "Invalid QR code data format" });
     }
 
+    // Validate appointment ID in QR code
     appointmentId = qrContent.appointmentId;
     if (!appointmentId) {
       return res.status(400).json({ message: "QR code missing appointment ID" });
     }
 
+    // Token validation for GET request
     if (req.method === "GET") {
       if (!qrToken) {
         return res.status(400).json({ message: "Missing QR code token" });
@@ -190,6 +196,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
         return res.status(401).json({ message: "Invalid or expired token" });
       }
 
+      // Validate token record in database
       const tokenRecord = await OneTimeToken.findOne({
         token: qrToken,
         appointmentId: decodedToken.appointmentId,
@@ -200,6 +207,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
         return res.status(401).json({ message: "Invalid or expired token" });
       }
     } else if (req.method === "POST") {
+      // Validate Authorization token in POST request
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({ message: "Unauthorized: Missing or invalid token" });
@@ -213,6 +221,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
         return res.status(401).json({ message: "Unauthorized: Invalid token" });
       }
 
+      // Check if user exists
       const user = await userModel.findById(decoded._id);
       if (!user) {
         return res.status(401).json({ message: "Unauthorized: User not found" });
@@ -223,6 +232,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     const appointment = await Appointment.findById(appointmentId)
       .populate("patient_id", "name email phone_number")
       .populate("user_id", "name");
+
     if (!appointment) {
       return res.status(404).json({ message: "Appointment not found" });
     }
@@ -234,6 +244,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
       return res.status(404).json({ message: "Patient or healthcare provider not found" });
     }
 
+    // Create PDF
     const doc = new jsPDF();
     doc.setFontSize(12);
 
@@ -241,6 +252,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     const lineHeight = 10;
     const maxWidth = 180;
 
+    // Appointment information
     doc.text("APPOINTMENT INFORMATION", 10, yOffset);
     yOffset += lineHeight;
     doc.text("------------------------", 10, yOffset);
@@ -261,6 +273,7 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     yOffset += reasonLines.length * lineHeight;
     yOffset += lineHeight;
 
+    // Patient information
     doc.text("PATIENT INFORMATION", 10, yOffset);
     yOffset += lineHeight;
     doc.text("------------------------", 10, yOffset);
@@ -270,14 +283,16 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
     doc.text(`Email: ${patient.email || "Not provided"}`, 10, yOffset);
     yOffset += lineHeight;
     doc.text(`Phone Number: ${patient.phone_number || "Not provided"}`, 10, yOffset);
-   
 
+    // Generate PDF buffer
     const pdfBuffer = doc.output("arraybuffer");
 
+    // Clean up token (if GET request)
     if (req.method === "GET" && qrToken) {
       await OneTimeToken.deleteOne({ token: qrToken });
     }
 
+    // Send PDF response
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
@@ -286,17 +301,20 @@ export const validateQRCodeAndGeneratePDF = async (req, res) => {
 
     res.status(200).send(Buffer.from(pdfBuffer));
   } catch (error) {
+    // General error handler
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
 
-// Modified updateAppointmentStatus to include appointmentId in QR code
+
+// Update appointment status, generate and upload QR code if activated, and notify patient
 export const updateAppointmentStatus = [
   async (req, res) => {
     const { appointmentId } = req.params;
     const { status } = req.body;
 
     try {
+      // Fetch appointment with patient and doctor details
       const appointment = await Appointment.findById(appointmentId)
         .populate("patient_id", "name email")
         .populate("user_id", "name");
@@ -305,32 +323,37 @@ export const updateAppointmentStatus = [
         return res.status(404).json({ message: "Appointment not found" });
       }
 
+      // Validate status
       const validStatuses = ["pending", "active", "completed", "rejected"];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ message: "Invalid status value" });
       }
 
+      // Prevent invalid status transitions
       if (status === "active" && appointment.status !== "pending") {
         return res.status(400).json({ message: "Only pending appointments can be validated to active" });
       }
-
       if (status === "rejected" && appointment.status !== "pending") {
         return res.status(400).json({ message: "Only pending appointments can be rejected" });
       }
 
       appointment.status = status;
+
+      // Handle QR code generation and upload when activating appointment
       if (status === "active") {
         const qrData = JSON.stringify({
           patientName: appointment.patient_id.name,
           doctorName: appointment.user_id.name,
           date: new Date(appointment.date).toLocaleDateString(),
           time: appointment.time,
-          appointmentId: appointment._id.toString(), // Include appointmentId
+          appointmentId: appointment._id.toString(),
         });
 
+        // Generate QR code image from data
         const qrCodeDataUrl = await QRCode.toDataURL(qrData);
         const qrCodeBuffer = Buffer.from(qrCodeDataUrl.split(",")[1], "base64");
 
+        // Upload QR code to Cloudinary
         const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
             {
@@ -351,10 +374,13 @@ export const updateAppointmentStatus = [
 
       await appointment.save();
 
+      // Get WebSocket and user map
       const io = req.app.get("io");
       const users = req.app.get("users");
 
+      // Handle active status: create chat, notify and email patient
       if (status === "active") {
+        // Create or update chat between patient and doctor
         const existingChat = await Chat.findOne({
           patient_id: appointment.patient_id._id,
           healthcare_id: appointment.user_id._id,
@@ -378,6 +404,7 @@ export const updateAppointmentStatus = [
           chatId = existingChat._id;
         }
 
+        // Create and send notification
         const patientNotification = new Notification({
           user_id: appointment.patient_id._id,
           type: "appointment_accepted",
@@ -393,7 +420,7 @@ export const updateAppointmentStatus = [
           io.to(patientSocket).emit("receive_notification", patientNotification);
         }
 
-        const patientEmail = appointment.patient_id.email;
+        // Send email to patient with embedded QR code
         const qrCodeData = JSON.stringify({
           patientName: appointment.patient_id.name,
           doctorName: appointment.user_id.name,
@@ -405,7 +432,7 @@ export const updateAppointmentStatus = [
         const qrCodeBuffer = Buffer.from(qrCodeDataUrl.split(",")[1], "base64");
 
         await sendEmail(
-          patientEmail,
+          appointment.patient_id.email,
           "Appointment Accepted",
           `
             <!DOCTYPE html>
@@ -456,21 +483,17 @@ export const updateAppointmentStatus = [
               <div class="email-container">
                 <h2>Appointment Confirmed</h2>
                 <p>Dear <strong>${appointment.patient_id.name}</strong>,</p>
-                <p>We’re pleased to inform you that your appointment has been <strong>accepted</strong>.</p>
+                <p>Your appointment has been <strong>accepted</strong>.</p>
                 <p>
                   <strong>Doctor:</strong> ${appointment.user_id.name}<br>
                   <strong>Date:</strong> ${new Date(appointment.date).toLocaleDateString()}<br>
                   <strong>Time:</strong> ${appointment.time}
                 </p>
-                <p>Please find your QR code below. Present it at the time of your appointment:</p>
-                
+                <p>Present the QR code below at your appointment:</p>
                 <div class="qr-section">
                   <img src="cid:qrcode" alt="QR Code">
                 </div>
-        
                 <p>You can now chat with your doctor through the platform.</p>
-              
-        
                 <div class="footer">
                   &copy; ${new Date().getFullYear()} HealthTrack | All rights reserved.
                 </div>
@@ -486,9 +509,9 @@ export const updateAppointmentStatus = [
             },
           ]
         );
-        
       }
 
+      // Handle rejected status: notify and email patient
       if (status === "rejected") {
         const patientNotification = new Notification({
           user_id: appointment.patient_id._id,
@@ -505,9 +528,8 @@ export const updateAppointmentStatus = [
           io.to(patientSocket).emit("receive_notification", patientNotification);
         }
 
-        const patientEmail = appointment.patient_id.email;
         await sendEmail(
-          patientEmail,
+          appointment.patient_id.email,
           "Appointment Rejected",
           `
             <!DOCTYPE html>
@@ -548,7 +570,7 @@ export const updateAppointmentStatus = [
               <div class="email-container">
                 <h2>Appointment Rejected</h2>
                 <p>Dear <strong>${appointment.patient_id.name}</strong>,</p>
-                <p>We regret to inform you that your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(appointment.date).toLocaleDateString()} at ${appointment.time}</strong> has been <strong>rejected</strong>.</p>
+                <p>Your appointment with <strong>${appointment.user_id.name}</strong> on <strong>${new Date(appointment.date).toLocaleDateString()} at ${appointment.time}</strong> has been <strong>rejected</strong>.</p>
                 <p>Please consider scheduling a new appointment at your convenience.</p>
                 <div class="footer">
                   &copy; ${new Date().getFullYear()} HealthTrack | All rights reserved.
@@ -558,7 +580,6 @@ export const updateAppointmentStatus = [
             </html>
           `
         );
-        
       }
 
       res.status(200).json({ message: "Appointment status updated", appointment });
@@ -568,13 +589,15 @@ export const updateAppointmentStatus = [
   },
 ];
 
-// Remaining controller functions (unchanged)
+// Get all pending healthcare providers
 export const getPendingHealthCare = async (req, res) => {
   try {
+    // Find unapproved users with type "healthcare"
     const pendingUsers = await userModel
       .find({ user_type: "healthcare", isApproved: false })
       .select("name email phone_number createdAt profile_image");
 
+    // For each user, get their detailed healthcare info based on type
     const pendingDetails = await Promise.all(
       pendingUsers.map(async (user) => {
         const healthcare = await HealthCare.findOne({ user_id: user._id });
@@ -598,6 +621,7 @@ export const getPendingHealthCare = async (req, res) => {
             break;
         }
 
+        // Return combined user and healthcare details
         return {
           user: {
             _id: user._id,
@@ -615,27 +639,35 @@ export const getPendingHealthCare = async (req, res) => {
       })
     );
 
+    // Filter out null entries and return
     res.status(200).json(pendingDetails.filter((detail) => detail !== null));
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
+// Approve a pending healthcare provider
 export const approveHealthCare = async (req, res) => {
   const { userId } = req.body;
 
   try {
     const user = await userModel.findById(userId);
+
+    // Check if user exists and is a healthcare provider
     if (!user || user.user_type !== "healthcare") {
       return res.status(404).json({ message: "User not found or not a healthcare provider" });
     }
+
+    // Prevent double approval
     if (user.isApproved) {
       return res.status(400).json({ message: "User is already approved" });
     }
 
+    // Approve and save user
     user.isApproved = true;
     await user.save();
 
+    // Send approval email
     await sendEmail(
       user.email,
       "Your Application Has Been Approved",
@@ -666,7 +698,6 @@ export const approveHealthCare = async (req, res) => {
               color: #2a7ae2;
               margin-top: 0;
             }
-            
             .footer {
               margin-top: 40px;
               font-size: 13px;
@@ -689,7 +720,6 @@ export const approveHealthCare = async (req, res) => {
         </html>
       `
     );
-    
 
     res.status(200).json({ message: "Healthcare provider approved successfully" });
   } catch (error) {
@@ -697,11 +727,14 @@ export const approveHealthCare = async (req, res) => {
   }
 };
 
+// Reject a pending healthcare provider
 export const rejectHealthCare = async (req, res) => {
   const { userId } = req.body;
 
   try {
     const user = await userModel.findById(userId);
+
+    // Check if user exists and is a healthcare provider
     if (!user || user.user_type !== "healthcare") {
       return res.status(404).json({ message: "User not found or not a healthcare provider" });
     }
@@ -711,6 +744,7 @@ export const rejectHealthCare = async (req, res) => {
       return res.status(404).json({ message: "Healthcare record not found" });
     }
 
+    // Delete specific healthcare type record
     switch (healthcare.healthcare_type) {
       case "doctor":
         await Doctor.deleteOne({ healthcare_id: healthcare._id });
@@ -728,7 +762,10 @@ export const rejectHealthCare = async (req, res) => {
         break;
     }
 
+    // Delete general healthcare record
     await HealthCare.deleteOne({ user_id: userId });
+
+    // Prepare rejection email
     const subject = "Sorry, Your Application Has Been Rejected";
     const html = `
   <!DOCTYPE html>
@@ -763,7 +800,6 @@ export const rejectHealthCare = async (req, res) => {
         color: #777;
         text-align: center;
       }
-   
     </style>
   </head>
   <body>
@@ -771,7 +807,6 @@ export const rejectHealthCare = async (req, res) => {
       <h2>Application Rejected</h2>
       <p>Dear <strong>${user.name}</strong>,</p>
       <p>We regret to inform you that your application to join the <strong>Healthrack</strong> platform as a healthcare provider has been <strong>rejected</strong>.</p>
-    
       <div class="footer">
         &copy; ${new Date().getFullYear()} HealthTrack | Supporting Healthcare Excellence.
       </div>
@@ -780,18 +815,22 @@ export const rejectHealthCare = async (req, res) => {
   </html>
 `;
 
+    // Send rejection email and delete user
     await sendEmail(user.email, subject, html);
     await userModel.deleteOne({ _id: userId });
+
     res.status(200).json({ message: "Healthcare provider rejected and account deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
+// Get details of a specific healthcare provider based on logged-in user
 export const getHealthCareDetails = async (req, res) => {
   try {
     const userId = req.user._id;
 
+    // Find healthcare linked to the user
     const healthcare = await HealthCare.findOne({ user_id: userId });
     if (!healthcare) {
       return res.status(404).json({ message: "Healthcare details not found" });
@@ -799,6 +838,7 @@ export const getHealthCareDetails = async (req, res) => {
 
     let details = { ...healthcare._doc };
 
+    // Fetch additional details based on the type
     switch (healthcare.healthcare_type) {
       case "doctor":
         const doctor = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name price");
@@ -826,19 +866,20 @@ export const getHealthCareDetails = async (req, res) => {
   }
 };
 
+// Get all approved healthcare providers with their relevant details
 export const getAllApprovedHealthCare = async (req, res) => {
   try {
+    // Get users marked as approved healthcare providers
     const approvedUsers = await userModel
       .find({ user_type: "healthcare", isApproved: true })
       .select("name email phone_number profile_image")
-      .lean(); 
+      .lean();
 
     if (approvedUsers.length === 0) {
       return res.status(200).json([]);
     }
 
-   
-
+    // Gather type-specific data for each provider
     const healthcareDetails = await Promise.all(
       approvedUsers.map(async (user) => {
         if (!user._id || !user.name) {
@@ -880,6 +921,7 @@ export const getAllApprovedHealthCare = async (req, res) => {
           return null;
         }
 
+        // Return combined details
         return {
           user_id: user._id,
           name: user.name,
@@ -895,6 +937,7 @@ export const getAllApprovedHealthCare = async (req, res) => {
       })
     );
 
+    // Filter out invalid results
     const filteredDetails = healthcareDetails.filter((detail) => detail !== null);
     res.status(200).json(filteredDetails);
   } catch (error) {
@@ -902,6 +945,7 @@ export const getAllApprovedHealthCare = async (req, res) => {
   }
 };
 
+// Get appointments for a specific healthcare provider
 export const getHealthcareAppointments = async (req, res) => {
   try {
     const appointments = await Appointment.find({ user_id: req.user._id })
@@ -911,8 +955,9 @@ export const getHealthcareAppointments = async (req, res) => {
         model: userModel,
       })
       .sort({ date: -1 })
-      .lean(); 
+      .lean();
 
+    // Format patient data
     const transformedAppointments = appointments.map((appointment) => ({
       ...appointment,
       patient_id: {
@@ -928,6 +973,7 @@ export const getHealthcareAppointments = async (req, res) => {
   }
 };
 
+// Get detailed profile of a specific healthcare provider by ID
 export const getHealthcareProfile = async (req, res) => {
   const { healthcareId } = req.params;
 
@@ -960,6 +1006,7 @@ export const getHealthcareProfile = async (req, res) => {
         break;
     }
 
+    // Get completed appointments with ratings and comments
     const appointments = await Appointment.find({
       user_id: healthcareId,
       status: "completed",
@@ -975,6 +1022,7 @@ export const getHealthcareProfile = async (req, res) => {
       date: appt.date || new Date(),
     }));
 
+    // Build full profile
     const profile = {
       user_id: healthcareUser._id,
       name: healthcareUser.name || "Unknown Provider",
@@ -998,10 +1046,14 @@ export const getHealthcareProfile = async (req, res) => {
   }
 };
 
+
+// Middleware to update healthcare user profile
 export const updateHealthcareProfile = [
-  checkApproval,
+  checkApproval, // Check if the user is approved to perform the operation
   async (req, res) => {
     const userId = req.user._id;
+
+    // Destructure relevant fields from the request body
     const {
       phone_number,
       location_link,
@@ -1015,6 +1067,7 @@ export const updateHealthcareProfile = [
       clinic_name,
       price,
     } = req.body;
+
     const profileImageFile = req.file;
 
     try {
@@ -1023,19 +1076,23 @@ export const updateHealthcareProfile = [
         return res.status(404).json({ message: "User not found or not healthcare" });
       }
 
+      // Update phone number if provided
       if (phone_number) {
         user.phone_number = phone_number;
       }
 
       let profileImageUrl = user.profile_image;
 
+      // Handle profile image upload
       if (profileImageFile) {
         try {
           if (user.profile_image) {
+            // Delete old image from Cloudinary
             const publicId = user.profile_image.split("/").pop().split(".")[0];
             await cloudinary.uploader.destroy(`profiles/healthcare/${publicId}`).catch((err) => { throw err });
           }
 
+          // Upload new image to Cloudinary
           const uploadResult = await new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
               {
@@ -1064,16 +1121,19 @@ export const updateHealthcareProfile = [
 
       await user.save();
 
+      // Fetch healthcare-specific profile
       const healthcare = await HealthCare.findOne({ user_id: userId });
       if (!healthcare) {
         return res.status(404).json({ message: "Healthcare profile not found" });
       }
 
+      // Update general healthcare info
       healthcare.profile_image = profileImageUrl;
       healthcare.location_link = location_link || healthcare.location_link;
       healthcare.working_hours = working_hours || healthcare.working_hours;
       healthcare.can_deliver = can_deliver === "true" || can_deliver === true;
 
+      // Update based on healthcare type
       switch (healthcare.healthcare_type) {
         case "doctor":
           const doctor = await Doctor.findOne({ healthcare_id: healthcare._id });
@@ -1090,7 +1150,7 @@ export const updateHealthcareProfile = [
             nurse.ward = ward || nurse.ward;
             nurse.clinic_name = clinic_name || nurse.clinic_name;
             nurse.price = price ? parseFloat(price) : nurse.price;
-            await nurse/save();
+            await nurse.save();
           }
           break;
         case "pharmacy":
@@ -1113,12 +1173,15 @@ export const updateHealthcareProfile = [
 
       await healthcare.save();
 
+      // Fetch updated user and healthcare data
       const updatedUser = await userModel
         .findById(userId)
         .select("name email phone_number profile_image isBanned isApproved")
         .lean();
 
       let updatedHealthcare = { ...healthcare.toObject(), isApproved: user.isApproved };
+
+      // Attach specific role-based fields to healthcare object
       switch (healthcare.healthcare_type) {
         case "doctor":
           const doctor = await Doctor.findOne({ healthcare_id: healthcare._id }).select("speciality clinic_name price");
@@ -1138,6 +1201,7 @@ export const updateHealthcareProfile = [
           break;
       }
 
+      // Return final response
       res.status(200).json({
         message: "Healthcare profile updated successfully",
         healthcare: {
@@ -1155,6 +1219,7 @@ export const updateHealthcareProfile = [
   },
 ];
 
+// Send email with deletion confirmation link
 export const deleteHealthcareRequest = async (req, res) => {
   const token = req.headers.authorization.split(" ")[1];
   const { frontendUrl } = req.body;
@@ -1166,9 +1231,11 @@ export const deleteHealthcareRequest = async (req, res) => {
       return res.status(404).json({ message: "User not found or not healthcare" });
     }
 
+    // Generate deletion confirmation token
     const deletionToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
     const deletionLink = `${frontendUrl}/delete-account?token=${deletionToken}`;
 
+    // Send email to user with confirmation link
     await sendEmail(
       user.email,
       "Account Deletion Request",
@@ -1181,8 +1248,9 @@ export const deleteHealthcareRequest = async (req, res) => {
   }
 };
 
+// Create a new announcement
 export const createAnnouncement = [
-  checkApproval,
+  checkApproval, // Ensure user is approved
   async (req, res) => {
     const { title, content } = req.body;
 
@@ -1196,6 +1264,7 @@ export const createAnnouncement = [
         return res.status(403).json({ message: "Account not approved or banned" });
       }
 
+      // Create and save announcement
       const announcement = new Announcement({
         title,
         content,
@@ -1210,6 +1279,7 @@ export const createAnnouncement = [
   },
 ];
 
+// Get all announcements (with optional filtering by visited doctors)
 export const getAllAnnouncements = async (req, res) => {
   try {
     const { visited } = req.query;
@@ -1217,6 +1287,7 @@ export const getAllAnnouncements = async (req, res) => {
     let announcements;
 
     if (visited === "true" && user && user.user_type === "patient") {
+      // Fetch accepted appointments for the patient
       const acceptedAppointments = await Appointment.find({
         patient_id: user._id,
         status: { $in: ["active", "completed"] },
@@ -1228,6 +1299,7 @@ export const getAllAnnouncements = async (req, res) => {
         return res.status(200).json([]);
       }
 
+      // Get only doctor-type healthcare profiles
       const doctorHealthCare = await HealthCare.find({
         user_id: { $in: healthcareIds },
         healthcare_type: "doctor",
@@ -1239,6 +1311,7 @@ export const getAllAnnouncements = async (req, res) => {
         return res.status(200).json([]);
       }
 
+      // Fetch announcements by those doctors
       announcements = await Announcement.find({
         healthcare_id: { $in: doctorIds },
       })
@@ -1250,6 +1323,7 @@ export const getAllAnnouncements = async (req, res) => {
         .sort({ createdAt: -1 })
         .lean();
     } else {
+      // Return all announcements if no filtering
       announcements = await Announcement.find()
         .populate({
           path: "healthcare_id",
@@ -1260,6 +1334,7 @@ export const getAllAnnouncements = async (req, res) => {
         .lean(); 
     }
 
+    // Add extra healthcare metadata to each announcement
     const formattedAnnouncements = await Promise.all(
       announcements.map(async (announcement) => {
         let healthcareData = {};
@@ -1288,91 +1363,120 @@ export const getAllAnnouncements = async (req, res) => {
       })
     );
 
-
     res.status(200).json(formattedAnnouncements);
   } catch (error) {
     res.status(500).json({ message: `Server error: ${error.message}` });
   }
 };
 
+
+// Deletes a specific announcement if it exists and the requester is authorized
 export const deleteAnnouncement = async (req, res) => {
+  // Extract announcement ID from the URL parameters
   const { announcementId } = req.params;
 
   try {
+    // Find the announcement in the database by its ID
     const announcement = await Announcement.findById(announcementId);
+
+    // If the announcement doesn't exist, return a 404 error
     if (!announcement) {
       return res.status(404).json({ message: "Announcement not found" });
     }
 
+    // Check if the requester is the creator of the announcement
     if (announcement.healthcare_id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Unauthorized: Only the creator can delete this announcement" });
     }
 
+    // Delete the announcement from the database
     await Announcement.deleteOne({ _id: announcementId });
+
+    // Return a success response
     res.status(200).json({ message: "Announcement deleted successfully" });
   } catch (error) {
+    // Catch any server error and return a 500 response
     res.status(500).json({ message: "Server error" });
   }
 };
 
+
+// Adds unavailable slots for a healthcare provider, handling validation and potential conflicts
 export const addUnavailableSlot = async (req, res) => {
   try {
+    // Retrieve user from the database using their ID from the request (auth token)
     const user = await userModel.findById(req.user._id);
+
+    // Check if the user exists and is a healthcare provider, if not, return unauthorized error
     if (!user || user.user_type !== "healthcare") {
       return res.status(403).json({ message: "Unauthorized: Only healthcare providers can set unavailable slots" });
     }
 
+    // Ensure the request body is an array of slots
     if (!Array.isArray(req.body)) {
       return res.status(400).json({ message: "Request body must be an array of slots" });
     }
 
     const slots = req.body;
+
+    // Ensure that at least one slot is provided
     if (slots.length === 0) {
       return res.status(400).json({ message: "At least one slot must be provided" });
     }
 
-    const savedSlots = [];
+    const savedSlots = []; // Array to store successfully saved slots
 
+    // Iterate over each slot to validate and save it
     for (const slot of slots) {
       const { date, startTime, endTime, reason } = slot;
 
-
+      // Ensure each slot has the required fields: date, startTime, and endTime
       if (!date || !startTime || !endTime) {
         return res.status(400).json({ message: "Each slot must include date, startTime, and endTime" });
       }
 
+      // Ensure start and end times are in HH:MM format using regular expressions
       if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
         return res.status(400).json({ message: "startTime and endTime must be in HH:MM format" });
       }
 
+      // Convert start and end times to date objects for further validation
       const [startHours, startMinutes] = startTime.split(":").map(Number);
       const [endHours, endMinutes] = endTime.split(":").map(Number);
       const slotDate = new Date(date);
 
+      // Check if the provided date is valid
       if (isNaN(slotDate.getTime())) {
         return res.status(400).json({ message: "Invalid date format" });
       }
 
+      // Create start and end datetime objects based on the provided date and time
       const startDateTime = new Date(slotDate);
       startDateTime.setUTCHours(startHours, startMinutes, 0, 0);
       const endDateTime = new Date(slotDate);
       endDateTime.setUTCHours(endHours, endMinutes, 0, 0);
 
+      // Ensure that the end time is after the start time
       if (startDateTime >= endDateTime) {
         return res.status(400).json({ message: `End time must be after start time for slot on ${date}` });
       }
 
       const now = new Date();
+
+      // Ensure that the start time is not in the past
       if (startDateTime < now) {
         return res.status(400).json({ message: "Cannot set unavailability in the past" });
       }
 
+      // Check if the slot represents a full-day unavailability (00:00 to 23:59)
       const isFullDay = startTime === "00:00" && endTime === "23:59";
 
+      // If the slot is a full day, handle special logic to reject pending appointments for the day
       if (isFullDay) {
         const slotDateStart = new Date(slotDate.setHours(0, 0, 0, 0));
         const slotDateEnd = new Date(slotDate.setHours(23, 59, 59, 999));
 
+        // Find all pending appointments for the day and reject them
         const pendingAppointments = await Appointment.find({
           user_id: req.user._id,
           date: { $gte: slotDateStart, $lte: slotDateEnd },
@@ -1382,9 +1486,10 @@ export const addUnavailableSlot = async (req, res) => {
           .populate("user_id", "name");
 
         for (const appointment of pendingAppointments) {
-          appointment.status = "rejected";
+          appointment.status = "rejected"; // Reject the appointment
           await appointment.save();
 
+          // Create a notification for the patient about the rejection
           const patientNotification = new Notification({
             user_id: appointment.patient_id._id,
             type: "appointment_rejected",
@@ -1395,6 +1500,7 @@ export const addUnavailableSlot = async (req, res) => {
           });
           await patientNotification.save();
 
+          // Emit a notification to the patient in real-time
           const io = req.app.get("io");
           const users = req.app.get("users");
           const patientSocket = users.get(appointment.patient_id._id.toString());
@@ -1402,6 +1508,7 @@ export const addUnavailableSlot = async (req, res) => {
             io.to(patientSocket).emit("receive_notification", patientNotification);
           }
 
+          // Send an email notification to the patient
           const patientEmail = appointment.patient_id.email;
           await sendEmail(
             patientEmail,
@@ -1414,32 +1521,10 @@ export const addUnavailableSlot = async (req, res) => {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
                 <title>Appointment Rejected</title>
                 <style>
-                  body {
-                    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
-                    background-color: #f4f6f8;
-                    margin: 0;
-                    padding: 40px 0;
-                  }
-                  .email-container {
-                    max-width: 600px;
-                    background-color: #ffffff;
-                    margin: auto;
-                    padding: 30px;
-                    border-radius: 10px;
-                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
-                    color: #333333;
-                  }
-                  h2 {
-                    color: #e02b2b;
-                    margin-top: 0;
-                  }
-                  .footer {
-                    margin-top: 40px;
-                    font-size: 13px;
-                    color: #777;
-                    text-align: center;
-                  }
-              
+                  body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 40px 0; }
+                  .email-container { max-width: 600px; background-color: #ffffff; margin: auto; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06); color: #333333; }
+                  h2 { color: #e02b2b; margin-top: 0; }
+                  .footer { margin-top: 40px; font-size: 13px; color: #777; text-align: center; }
                 </style>
               </head>
               <body>
@@ -1459,19 +1544,21 @@ export const addUnavailableSlot = async (req, res) => {
               </html>
             `
           );
-          
         }
 
+        // Delete any existing unavailable slots for the day
         await UnavailableSlot.deleteMany({
           healthcare_id: req.user._id,
           date: { $gte: slotDateStart, $lte: slotDateEnd },
         });
       } else {
+        // Handle the case for a partial time slot (not a full day)
         const existingSlots = await UnavailableSlot.find({
           healthcare_id: req.user._id,
           date: slotDate.toISOString().split("T")[0],
         });
 
+        // Check for overlapping unavailable slots
         for (const existingSlot of existingSlots) {
           const [existingStartHours, existingStartMinutes] = existingSlot.startTime.split(":").map(Number);
           const [existingEndHours, existingEndMinutes] = existingSlot.endTime.split(":").map(Number);
@@ -1487,12 +1574,14 @@ export const addUnavailableSlot = async (req, res) => {
           }
         }
 
+        // Check for conflicting existing appointments for the specified date and time
         const existingAppointments = await Appointment.find({
           user_id: req.user._id,
           date: slotDate.toISOString().split("T")[0],
           status: { $in: ["pending", "active"] },
         });
 
+        // Check for time conflicts with existing appointments
         for (const appt of existingAppointments) {
           const apptStart = new Date(appt.date);
           const [apptHours, apptMinutes] = appt.time.split(":").map(Number);
@@ -1507,6 +1596,7 @@ export const addUnavailableSlot = async (req, res) => {
         }
       }
 
+      // Create and save the unavailable slot
       const unavailableSlot = new UnavailableSlot({
         healthcare_id: req.user._id,
         date: slotDate,
@@ -1516,40 +1606,57 @@ export const addUnavailableSlot = async (req, res) => {
       });
 
       const savedSlot = await unavailableSlot.save();
-      savedSlots.push(savedSlot);
+      savedSlots.push(savedSlot); // Add the saved slot to the result array
     }
 
+    // Return a success response with the saved slots
     res.status(201).json({ message: "Unavailable slots added successfully", slot: savedSlots });
   } catch (error) {
+    // Catch any server error and return an appropriate message
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
+
+// Fetch all unavailable slots for the current healthcare provider
 export const getUnavailableSlots = async (req, res) => {
   try {
-    const slots = await UnavailableSlot.find({ healthcare_id: req.user._id }).sort({ date: 1, startTime: 1 });
+    // Find all unavailable slots for the current healthcare provider
+    const slots = await UnavailableSlot.find({ healthcare_id: req.user._id })
+      .sort({ date: 1, startTime: 1 }); // Sort by date and start time
+
+    // Return the list of unavailable slots
     res.status(200).json(slots);
   } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    // Handle errors and send server error message
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
+
+// Delete a specific unavailable slot by ID
 export const deleteUnavailableSlot = async (req, res) => {
   const { slotId } = req.params;
 
   try {
+    // Find the unavailable slot by ID
     const slot = await UnavailableSlot.findById(slotId);
     if (!slot) {
       return res.status(404).json({ message: "Unavailable slot not found" });
     }
 
+    // Check if the slot belongs to the current healthcare provider
     if (slot.healthcare_id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Unauthorized: You can only delete your own unavailable slots" });
     }
 
+    // Delete the unavailable slot
     await UnavailableSlot.deleteOne({ _id: slotId });
+
+    // Send a success response
     res.status(200).json({ message: "Unavailable slot deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    // Handle errors and send server error message
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
