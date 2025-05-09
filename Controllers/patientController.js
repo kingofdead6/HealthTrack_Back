@@ -844,15 +844,11 @@ export const createAppointment = async (req, res) => {
 
   try {
     const patient = await userModel.findById(req.user._id);
-
-    // Prevent banned users from booking
     if (patient.isBanned) {
       return res.status(403).json({ message: "Banned users cannot create appointments" });
     }
 
     const healthcare = await userModel.findById(user_id);
-
-    // Validate healthcare provider
     if (!healthcare || healthcare.user_type !== "healthcare" || !healthcare.isApproved || healthcare.isBanned) {
       return res.status(404).json({ message: "Healthcare provider not found, not approved, or banned" });
     }
@@ -860,24 +856,26 @@ export const createAppointment = async (req, res) => {
     const healthcareDetails = await HealthCare.findOne({ user_id });
     const { startHour, endHour } = parseWorkingHours(healthcareDetails?.working_hours);
 
-    // Convert date and time to UTC
-    const apptDate = new Date(date);
-    const [hours, minutes] = time.split(":");
-    apptDate.setUTCHours(parseInt(hours), parseInt(minutes), 0, 0);
+    // Validate date and time
+    const apptDate = new Date(`${date}T${time}:00`);
+    if (isNaN(apptDate.getTime())) {
+      return res.status(400).json({ message: "Invalid date or time format" });
+    }
 
     const apptDuration = parseInt(duration) || 30;
+    if (apptDuration !== 30 && apptDuration !== 60) {
+      return res.status(400).json({ message: "Duration must be 30 or 60 minutes" });
+    }
     const apptEnd = new Date(apptDate);
     apptEnd.setMinutes(apptEnd.getMinutes() + apptDuration);
 
-    const apptHour = apptDate.getUTCHours() + apptDate.getUTCMinutes() / 60;
+    const apptHour = apptDate.getHours() + apptDate.getMinutes() / 60;
     const apptEndHour = apptHour + apptDuration / 60;
 
-    // Ensure appointment is within working hours
     if (apptHour < startHour || apptEndHour > endHour) {
       return res.status(400).json({ message: `Appointment outside working hours (${startHour}:00 - ${endHour}:00)` });
     }
 
-    // Appointment must be within the next 30 days
     const now = new Date();
     const maxDate = new Date(now);
     maxDate.setDate(now.getDate() + 30);
@@ -899,7 +897,7 @@ export const createAppointment = async (req, res) => {
     for (const existingAppt of existingAppointments) {
       const existingStart = new Date(existingAppt.date);
       const [existingHours, existingMinutes] = existingAppt.time.split(":").map(Number);
-      existingStart.setUTCHours(existingHours, existingMinutes);
+      existingStart.setHours(existingHours, existingMinutes);
 
       const existingEnd = new Date(existingStart);
       existingEnd.setMinutes(existingEnd.getMinutes() + (existingAppt.duration || 30));
@@ -920,10 +918,10 @@ export const createAppointment = async (req, res) => {
       const [endHours, endMinutes] = slot.endTime.split(":").map(Number);
 
       const slotStart = new Date(slot.date);
-      slotStart.setUTCHours(startHours, startMinutes);
+      slotStart.setHours(startHours, startMinutes);
 
       const slotEnd = new Date(slot.date);
-      slotEnd.setUTCHours(endHours, endMinutes);
+      slotEnd.setHours(endHours, endMinutes);
 
       if (apptDate < slotEnd && apptEnd > slotStart) {
         return res.status(400).json({ message: "This time slot is marked as unavailable by the healthcare provider" });
@@ -953,7 +951,6 @@ export const createAppointment = async (req, res) => {
 
     await notification.save();
 
-    // Emit real-time notification if healthcare is online
     const io = req.app.get("io");
     const users = req.app.get("users");
     const recipientSocket = users.get(user_id.toString());
@@ -961,7 +958,6 @@ export const createAppointment = async (req, res) => {
       io.to(recipientSocket).emit("receive_notification", notification);
     }
 
-    // Send email notification
     await sendEmail(
       healthcare.email,
       "New Appointment Request",
@@ -1009,7 +1005,7 @@ export const createAppointment = async (req, res) => {
             ).toLocaleDateString()} at ${time}</strong>.</p>
             <p>Please review and accept or reject the appointment through the platform.</p>
             <div class="footer">
-              &copy; ${new Date().getFullYear()} HealthTrack | Connecting Healthcare Professionals with Patients.
+              © ${new Date().getFullYear()} HealthTrack | Connecting Healthcare Professionals with Patients.
             </div>
           </div>
         </body>
