@@ -877,13 +877,13 @@ export const createAppointment = async (req, res) => {
       return res.status(400).json({ message: `Appointment outside working hours (${startHour}:00 - ${endHour}:00)` });
     }
 
-    // Appointment must be within the next 7 days
+    // Appointment must be within the next 30 days
     const now = new Date();
     const maxDate = new Date(now);
-    maxDate.setDate(now.getDate() + 7);
+    maxDate.setDate(now.getDate() + 30);
 
     if (apptDate < now || apptDate > maxDate) {
-      return res.status(400).json({ message: "Appointments must be within today and 7 days ahead" });
+      return res.status(400).json({ message: "Appointments must be within today and 30 days ahead" });
     }
 
     // Check for overlapping existing appointments
