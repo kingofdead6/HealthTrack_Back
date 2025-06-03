@@ -88,10 +88,18 @@ const isGreeting = (message) => {
   return greetings.some((greeting) => lowerMessage === greeting);
 };
 
-// Fetch the best-rated doctor from the database using aggregation
+// Fetch all doctors with the highest average rating from the database using aggregation
 const getBestDoctor = async () => {
   try {
-    const bestDoctor = await Appointment.aggregate([
+    // Step 1: Check if there are any appointments with ratings
+    const ratedAppointments = await Appointment.find({ rating: { $ne: null } }).lean();
+    if (!ratedAppointments.length) {
+      console.log('No appointments with ratings found in the database.');
+      return 'No doctors with ratings found.';
+    }
+
+    // Step 2: Aggregate appointments to calculate average ratings
+    const doctorRatings = await Appointment.aggregate([
       { $match: { rating: { $ne: null } } }, // Filter appointments with ratings
       {
         $group: {
@@ -100,46 +108,70 @@ const getBestDoctor = async () => {
           count: { $sum: 1 }, // Count number of ratings
         },
       },
-      { $sort: { avgRating: -1, count: -1 } }, // Sort by rating and count
-      { $limit: 1 }, // Get top doctor
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'healthcares',
-          localField: '_id',
-          foreignField: 'user_id',
-          as: 'healthcare',
-        },
-      },
-      { $unwind: { path: '$healthcare', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'doctors',
-          localField: 'healthcare._id',
-          foreignField: 'healthcare_id',
-          as: 'doctor',
-        },
-      },
-      { $unwind: { path: '$doctor', preserveNullAndEmptyArrays: true } },
+      { $sort: { avgRating: -1, count: -1 } }, // Sort by rating (descending) and count (descending)
     ]);
 
-    // If no doctor is found
-    if (!bestDoctor.length || !bestDoctor[0].user || !bestDoctor[0].doctor) {
+    if (!doctorRatings.length) {
+      console.log('No doctor ratings calculated after aggregation.');
       return 'No doctors with ratings found.';
     }
 
-    const { user, doctor, avgRating } = bestDoctor[0];
-    return `The best doctor is ${user.name}, a ${doctor.speciality}, with an average rating of ${avgRating.toFixed(1)}.`;
+    // Step 3: Find the highest average rating
+    const highestRating = doctorRatings[0].avgRating;
+    console.log(`Highest average rating: ${highestRating}`);
+
+    // Step 4: Filter doctors with the highest average rating
+    const topDoctors = doctorRatings.filter(doctor => doctor.avgRating === highestRating);
+
+    // Step 5: Fetch details for all top doctors
+    const topDoctorDetails = await Promise.all(
+      topDoctors.map(async (doctor) => {
+        const user = await User.findById(doctor._id).lean();
+        if (!user) {
+          console.log(`User not found for ID: ${doctor._id}`);
+          return null;
+        }
+
+        const healthcare = await mongoose.model('HealthCare').findOne({ user_id: doctor._id }).lean();
+        if (!healthcare) {
+          console.log(`Healthcare not found for user ID: ${doctor._id}`);
+          return null;
+        }
+
+        const doctorDetails = await Doctor.findOne({ healthcare_id: healthcare._id }).lean();
+        if (!doctorDetails) {
+          console.log(`Doctor not found for healthcare ID: ${healthcare._id}`);
+          return null;
+        }
+
+        return {
+          user,
+          doctor: doctorDetails,
+          avgRating: doctor.avgRating,
+        };
+      })
+    );
+
+    // Filter out null results (failed lookups)
+    const validDoctors = topDoctorDetails.filter(doc => doc !== null);
+
+    if (!validDoctors.length) {
+      console.log('No valid doctors found after fetching details.');
+      return 'No doctors with ratings found.';
+    }
+
+    // Step 6: Format the response for all top doctors
+    const doctorList = validDoctors.map(({ user, doctor, avgRating }) => 
+      `${user.name}, a ${doctor.speciality}, with an average rating of ${avgRating.toFixed(1)}`
+    );
+
+    // Return formatted response
+    return validDoctors.length === 1
+      ? `The best doctor is ${doctorList[0]}.`
+      : `The best doctors are: ${doctorList.join('; ')}.`;
   } catch (error) {
-    return 'Unable to fetch best doctor due to an error.';
+    console.error('Error in getBestDoctor:', error.message);
+    return 'Unable to fetch best doctor(s) due to an error.';
   }
 };
 
@@ -155,7 +187,6 @@ const getSpecialties = async () => {
     return 'Unable to fetch specialties due to an error.';
   }
 };
-
 
 // Controller to handle chat messages with image support
 const handleChatMessage = async (req, res) => {
@@ -173,7 +204,7 @@ const handleChatMessage = async (req, res) => {
     if (dbQueryType) {
       let dbResponse;
       if (dbQueryType === 'bestDoctor') {
-        dbResponse = await getBestDoctor(); // Fetch best-rated doctor
+        dbResponse = await getBestDoctor(); // Fetch best-rated doctor(s)
       } else if (dbQueryType === 'specialties') {
         dbResponse = await getSpecialties(); // Fetch list of specialties
       }
